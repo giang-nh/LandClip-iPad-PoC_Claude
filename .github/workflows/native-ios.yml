@@ -1,0 +1,88 @@
+name: Native iPad PoC
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/build-native-xcframeworks.sh"
+      - "project-native.yml"
+      - "GISCore/**"
+      - "App/**"
+      - "Tests/**"
+      - ".github/workflows/native-ios.yml"
+  pull_request:
+    paths:
+      - "scripts/build-native-xcframeworks.sh"
+      - "project-native.yml"
+      - "GISCore/**"
+      - "App/**"
+      - "Tests/**"
+      - ".github/workflows/native-ios.yml"
+
+concurrency:
+  group: ipad-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-build-and-test:
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install build tools
+        run: brew install cmake ninja xcodegen
+
+      - name: Restore native build cache
+        id: native-cache
+        uses: actions/cache@v5
+        with:
+          path: Vendor
+          key: landclip-native-v2-gdal-3.11.4-proj-9.6.2-geos-3.14.1-sqlite-3500400-archive-3.8.9-${{ hashFiles('scripts/build-native-xcframeworks.sh') }}
+
+      - name: Build native XCFrameworks
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        run: |
+          set +e
+          bash scripts/build-native-xcframeworks.sh 2>&1 | tee native-build.log
+          STATUS=${PIPESTATUS[0]}
+          if [ "$STATUS" -ne 0 ]; then
+            tail -40 native-build.log | \
+              while IFS= read -r line; do echo "::error::$line"; done
+          fi
+          exit "$STATUS"
+
+      - name: Generate native Xcode project
+        run: xcodegen generate --spec project-native.yml
+
+      - name: Select iPad Simulator
+        run: |
+          DEVICE_ID=$(xcrun simctl list devices available -j | \
+            python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for runtime in d.values() for x in runtime if "iPad" in x["name"]))')
+          echo "DEVICE_ID=$DEVICE_ID" >> "$GITHUB_ENV"
+
+      - name: Build and test with native GDAL
+        run: |
+          set +e
+          xcodebuild \
+            -project LandClipIPad.xcodeproj \
+            -scheme LandClipIPad \
+            -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            CODE_SIGNING_ALLOWED=NO \
+            test 2>&1 | tee xcodebuild.log
+          STATUS=${PIPESTATUS[0]}
+          if [ "$STATUS" -ne 0 ]; then
+            grep -E '(^|: )(fatal )?error:' xcodebuild.log | tail -20 | \
+              while IFS= read -r line; do echo "::error::$line"; done
+          fi
+          exit "$STATUS"
+
+      - name: Upload native frameworks
+        uses: actions/upload-artifact@v4
+        with:
+          name: LandClip-native-xcframeworks
+          path: |
+            Vendor/*.xcframework
+            Vendor/Resources
+          retention-days: 7

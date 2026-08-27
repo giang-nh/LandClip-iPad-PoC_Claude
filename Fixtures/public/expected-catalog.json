@@ -1,0 +1,20 @@
+{
+  "crs": "EPSG:9210",
+  "layers": [
+    {
+      "name": "sample_points",
+      "geometryType": "Point",
+      "featureCount": 3
+    },
+    {
+      "name": "sample_lines",
+      "geometryType": "MultiLineString",
+      "featureCount": 2
+    },
+    {
+      "name": "sample_polygons",
+      "geometryType": "MultiPolygon",
+      "featureCount": 1
+    }
+  ]
+}
