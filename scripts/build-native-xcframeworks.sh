@@ -72,7 +72,6 @@ build_slice() {
     "-DCMAKE_OSX_SYSROOT=${cmake_sysroot}"
     -DCMAKE_OSX_ARCHITECTURES=arm64
     "-DCMAKE_OSX_DEPLOYMENT_TARGET=${DEPLOYMENT_TARGET}"
-    -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY
     -DCMAKE_BUILD_TYPE=Release
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON
     -DBUILD_SHARED_LIBS=OFF
@@ -82,8 +81,14 @@ build_slice() {
     "-DSQLite3_LIBRARY=${prefix}/lib/libsqlite3.a"
   )
 
+  # PROJ / GEOS / GDAL need link-less try-compiles because their cross-compile
+  # feature checks would otherwise fail to link against the iOS sysroot.
+  # libarchive is the opposite: it relies on check_function_exists actually
+  # linking so that iOS-absent symbols (futimesat, ...) are reported missing.
+  local try_static=(-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY)
+
   cmake -S "${SOURCE_DIR}/proj-${PROJ_VERSION}" -B "${build_root}/proj" \
-    "${common_cmake[@]}" \
+    "${common_cmake[@]}" "${try_static[@]}" \
     -DBUILD_APPS=OFF \
     -DBUILD_TESTING=OFF \
     -DBUILD_PROJSYNC=OFF \
@@ -93,7 +98,7 @@ build_slice() {
   cmake --build "${build_root}/proj" --target install --parallel
 
   cmake -S "${SOURCE_DIR}/geos-${GEOS_VERSION}" -B "${build_root}/geos" \
-    "${common_cmake[@]}" \
+    "${common_cmake[@]}" "${try_static[@]}" \
     -DBUILD_TESTING=OFF \
     -DBUILD_GEOSOP=OFF
   cmake --build "${build_root}/geos" --target install --parallel
@@ -125,7 +130,7 @@ build_slice() {
   cmake --build "${build_root}/libarchive" --target install --parallel
 
   cmake -S "${SOURCE_DIR}/gdal-${GDAL_VERSION}" -B "${build_root}/gdal" \
-    "${common_cmake[@]}" \
+    "${common_cmake[@]}" "${try_static[@]}" \
     -DBUILD_APPS=OFF \
     -DBUILD_TESTING=OFF \
     -DBUILD_PYTHON_BINDINGS=OFF \
