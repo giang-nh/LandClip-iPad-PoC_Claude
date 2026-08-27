@@ -16,7 +16,13 @@ targets:
     sources:
       - path: App
       - path: GISCore/Sources
-      - path: Vendor/Resources
+      # Bundle the GDAL/PROJ data trees at the .app root. A folder literally
+      # named "Resources" makes iOS treat the flat bundle as an old-style
+      # bundle and installation fails with "Missing bundle ID".
+      - path: Vendor/Resources/gdal
+        type: folder
+        buildPhase: resources
+      - path: Vendor/Resources/proj
         type: folder
         buildPhase: resources
     dependencies:
