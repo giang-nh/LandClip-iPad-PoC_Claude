@@ -1,0 +1,23 @@
+{
+  "writtenLayerCount": 3,
+  "layers": [
+    {
+      "sourceLayer": "sample_points",
+      "status": "written",
+      "candidateCount": 2,
+      "outputCount": 2
+    },
+    {
+      "sourceLayer": "sample_lines",
+      "status": "written",
+      "candidateCount": 1,
+      "outputCount": 1
+    },
+    {
+      "sourceLayer": "sample_polygons",
+      "status": "written",
+      "candidateCount": 1,
+      "outputCount": 1
+    }
+  ]
+}

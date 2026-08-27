@@ -94,13 +94,23 @@ struct NativePackageScanner: PackageScanning {
         }
     }
 
-    private static func extract(packageURL: URL, destinationURL: URL) throws {
+    private static func extract(
+        packageURL: URL,
+        destinationURL: URL,
+        onEvent: @escaping GISProgressBridge.Handler = { _ in false }
+    ) throws {
+        let bridge = GISProgressBridge(onEvent)
         var nativeError: UnsafeMutablePointer<CChar>?
         let succeeded = packageURL.path.withCString { packagePath in
             destinationURL.path.withCString { destinationPath in
-                landclip_archive_extract_ppkx(packagePath, destinationPath, &nativeError)
+                landclip_archive_extract_ppkx(
+                    packagePath, destinationPath,
+                    GISProgressBridge.callback, bridge.context,
+                    &nativeError
+                )
             }
         }
+        withExtendedLifetime(bridge) {}
         defer { landclip_gis_free_string(nativeError) }
         guard succeeded == 1 else {
             let message = nativeError.map { String(cString: $0) } ?? "Lỗi native không xác định."

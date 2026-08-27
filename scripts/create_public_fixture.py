@@ -102,6 +102,48 @@ def main() -> None:
     destination.with_name("expected-catalog.json").write_text(
         json.dumps(expected, indent=2) + "\n", encoding="utf-8"
     )
+
+    # A small AOI square (EPSG:9210, same CRS as the layers) covering the lower
+    # left of the data: it fully contains points 0-1, clips line 0 and the
+    # polygon, and misses point 2 and line 1 entirely.
+    aoi = {
+        "type": "FeatureCollection",
+        "crs": {"type": "name", "properties": {"name": "urn:ogc:def:crs:EPSG::9210"}},
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[
+                        [500_000, 1_200_000],
+                        [500_015, 1_200_000],
+                        [500_015, 1_200_015],
+                        [500_000, 1_200_015],
+                        [500_000, 1_200_000],
+                    ]],
+                },
+            }
+        ],
+    }
+    destination.with_name("sample-aoi.geojson").write_text(
+        json.dumps(aoi, indent=2) + "\n", encoding="utf-8"
+    )
+    expected_clip = {
+        "writtenLayerCount": 3,
+        "layers": [
+            {"sourceLayer": "sample_points", "status": "written",
+             "candidateCount": 2, "outputCount": 2},
+            {"sourceLayer": "sample_lines", "status": "written",
+             "candidateCount": 1, "outputCount": 1},
+            {"sourceLayer": "sample_polygons", "status": "written",
+             "candidateCount": 1, "outputCount": 1},
+        ],
+    }
+    destination.with_name("expected-clip.json").write_text(
+        json.dumps(expected_clip, indent=2) + "\n", encoding="utf-8"
+    )
+
     package_path = destination.with_name("sample.ppkx")
     with zipfile.ZipFile(package_path, "w", compression=zipfile.ZIP_DEFLATED) as package:
         for file_path in sorted(destination.rglob("*")):

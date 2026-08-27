@@ -84,6 +84,64 @@ final class PackageCatalogModelTests: XCTestCase {
         XCTAssertEqual(expected.crs, "EPSG:9210")
     }
 
+    private struct ExpectedClip: Decodable {
+        struct Layer: Decodable {
+            let sourceLayer: String
+            let status: String
+            let candidateCount: Int
+            let outputCount: Int
+        }
+        let writtenLayerCount: Int
+        let layers: [Layer]
+    }
+
+    func testNativeClipPipeline() throws {
+        let engine = NativeClipEngine()
+        guard engine.isAvailable else {
+            throw XCTSkip("Native GDAL is only enabled by project-native.yml")
+        }
+        let bundle = Bundle(for: Self.self)
+        guard
+            let gdbURL = bundle.url(forResource: "sample", withExtension: "gdb", subdirectory: "public")
+                ?? bundle.url(forResource: "sample", withExtension: "gdb"),
+            let aoiURL = bundle.url(forResource: "sample-aoi", withExtension: "geojson", subdirectory: "public")
+                ?? bundle.url(forResource: "sample-aoi", withExtension: "geojson"),
+            let expectedURL = bundle.url(forResource: "expected-clip", withExtension: "json", subdirectory: "public")
+                ?? bundle.url(forResource: "expected-clip", withExtension: "json")
+        else {
+            return XCTFail("Clip fixtures are missing from the test bundle")
+        }
+
+        let outputDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("clip-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: outputDirectory) }
+
+        let events = NSMutableArray()
+        let result = try engine.clip(gdbURLs: [gdbURL], aoiURL: aoiURL, outputDirectory: outputDirectory) { json in
+            if let event = GISProgressEvent.decode(json) { events.add(event.event) }
+            return false
+        }
+
+        let expected = try JSONDecoder().decode(ExpectedClip.self, from: Data(contentsOf: expectedURL))
+        XCTAssertEqual(result.writtenLayerCount, expected.writtenLayerCount)
+        for expectedLayer in expected.layers {
+            guard let actual = result.layers.first(where: { $0.sourceLayer == expectedLayer.sourceLayer }) else {
+                return XCTFail("Missing result for \(expectedLayer.sourceLayer)")
+            }
+            XCTAssertEqual(actual.status, expectedLayer.status, expectedLayer.sourceLayer)
+            XCTAssertEqual(actual.candidateCount, expectedLayer.candidateCount, expectedLayer.sourceLayer)
+            XCTAssertEqual(actual.outputCount, expectedLayer.outputCount, expectedLayer.sourceLayer)
+        }
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: result.outputGeoPackage))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: result.summaryCsv))
+        let gpkgSize = (try FileManager.default.attributesOfItem(atPath: result.outputGeoPackage)[.size] as? Int) ?? 0
+        XCTAssertGreaterThan(gpkgSize, 0)
+        XCTAssertTrue(events.contains("complete"))
+        XCTAssertTrue(events.contains("layer_done"))
+    }
+
     func testNativePPKXEndToEnd() async throws {
         guard NativeGeodatabaseReader().isAvailable else {
             throw XCTSkip("Native GDAL is only enabled by project-native.yml")

@@ -1,9 +1,13 @@
 #include "GISCore.h"
 
+#include <cctype>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #ifndef LANDCLIP_WITH_GDAL
 #define LANDCLIP_WITH_GDAL 0
@@ -13,6 +17,8 @@
 #include <archive.h>
 #include <archive_entry.h>
 #include <cpl_conv.h>
+#include <cpl_string.h>
+#include <cpl_vsi.h>
 #include <gdal.h>
 #include <ogr_api.h>
 #include <ogr_srs_api.h>
@@ -66,6 +72,14 @@ bool is_safe_archive_path(const char *path) {
     return normalized.find(':') == std::string::npos;
 }
 
+/// Invokes the progress callback if present. Returns true when the caller asked
+/// to cancel.
+bool report_progress(landclip_progress_callback callback, void *context,
+                     const std::string &event_json) {
+    if (callback == nullptr) return false;
+    return callback(context, event_json.c_str()) != 0;
+}
+
 #if LANDCLIP_WITH_GDAL
 const char *geometry_type_name(OGRwkbGeometryType type) {
     switch (wkbFlatten(type)) {
@@ -79,6 +93,43 @@ const char *geometry_type_name(OGRwkbGeometryType type) {
     case wkbNone: return "None";
     default: return "Unknown";
     }
+}
+
+/// One of the six 2D families the PoC supports, or empty for anything else
+/// (annotation, 3D-only surfaces, unknown).
+std::string geometry_family(OGRwkbGeometryType type) {
+    switch (wkbFlatten(type)) {
+    case wkbPoint:
+    case wkbMultiPoint: return "Point";
+    case wkbLineString:
+    case wkbMultiLineString: return "Line";
+    case wkbPolygon:
+    case wkbMultiPolygon: return "Polygon";
+    default: return "";
+    }
+}
+
+/// RAII wrappers keep the OGR C handles exception- and early-return-safe.
+struct GeometryGuard {
+    OGRGeometryH handle = nullptr;
+    ~GeometryGuard() { if (handle != nullptr) OGR_G_DestroyGeometry(handle); }
+    OGRGeometryH release() { OGRGeometryH h = handle; handle = nullptr; return h; }
+};
+
+struct DatasetGuard {
+    GDALDatasetH handle = nullptr;
+    ~DatasetGuard() { if (handle != nullptr) GDALClose(handle); }
+};
+
+std::string csv_cell(const std::string &value) {
+    if (value.find_first_of(",\"\n\r") == std::string::npos) return value;
+    std::string escaped = "\"";
+    for (char character : value) {
+        if (character == '"') escaped += '"';
+        escaped += character;
+    }
+    escaped += '"';
+    return escaped;
 }
 #endif
 }
@@ -185,6 +236,8 @@ void landclip_gis_free_string(char *value) {
 
 int landclip_archive_extract_ppkx(const char *package_path,
                                   const char *destination_path,
+                                  landclip_progress_callback progress,
+                                  void *progress_context,
                                   char **error_message) {
     if (error_message != nullptr) *error_message = nullptr;
 #if LANDCLIP_WITH_GDAL
@@ -195,13 +248,15 @@ int landclip_archive_extract_ppkx(const char *package_path,
     archive *input = archive_read_new();
     archive *output = archive_write_disk_new();
     archive_read_support_filter_all(input);
+    // ArcGIS packages are usually ZIP but older ones are 7z; accept both.
     archive_read_support_format_zip(input);
+    archive_read_support_format_7zip(input);
     archive_write_disk_set_options(
         output,
         ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_SECURE_NODOTDOT |
             ARCHIVE_EXTRACT_SECURE_SYMLINKS
     );
-    if (archive_read_open_filename(input, package_path, 64 * 1024) != ARCHIVE_OK) {
+    if (archive_read_open_filename(input, package_path, 256 * 1024) != ARCHIVE_OK) {
         const char *message = archive_error_string(input);
         if (error_message != nullptr) {
             *error_message = copy_string(message == nullptr ? "Could not open PPKX." : message);
@@ -213,6 +268,9 @@ int landclip_archive_extract_ppkx(const char *package_path,
 
     archive_entry *entry = nullptr;
     int result = ARCHIVE_OK;
+    bool cancelled = false;
+    std::int64_t entries_done = 0;
+    std::int64_t bytes_done = 0;
     while ((result = archive_read_next_header(input, &entry)) == ARCHIVE_OK) {
         const char *relative_path = archive_entry_pathname(entry);
         if (!is_safe_archive_path(relative_path) || archive_entry_symlink(entry) != nullptr ||
@@ -233,13 +291,27 @@ int landclip_archive_extract_ppkx(const char *package_path,
         while ((result = archive_read_data_block(input, &buffer, &size, &offset)) == ARCHIVE_OK) {
             result = archive_write_data_block(output, buffer, size, offset);
             if (result < ARCHIVE_OK) break;
+            bytes_done += static_cast<std::int64_t>(size);
         }
         if (result != ARCHIVE_EOF && result < ARCHIVE_OK) break;
         result = archive_write_finish_entry(output);
         if (result < ARCHIVE_OK) break;
+
+        entries_done += 1;
+        if ((entries_done % 16) == 0) {
+            std::ostringstream event;
+            event << "{\"event\":\"extract\",\"entriesDone\":" << entries_done
+                  << ",\"bytesDone\":" << bytes_done << "}";
+            if (report_progress(progress, progress_context, event.str())) {
+                cancelled = true;
+                break;
+            }
+        }
     }
-    const bool succeeded = result == ARCHIVE_EOF;
-    if (!succeeded && error_message != nullptr) {
+    bool succeeded = !cancelled && result == ARCHIVE_EOF;
+    if (cancelled && error_message != nullptr) {
+        *error_message = copy_string("Extraction cancelled.");
+    } else if (!succeeded && error_message != nullptr) {
         const char *message = archive_error_string(output);
         if (message == nullptr) message = archive_error_string(input);
         *error_message = copy_string(message == nullptr ? "Could not extract PPKX." : message);
@@ -252,7 +324,402 @@ int landclip_archive_extract_ppkx(const char *package_path,
 #else
     (void)package_path;
     (void)destination_path;
+    (void)progress;
+    (void)progress_context;
     if (error_message != nullptr) *error_message = copy_string("GISCore was built without archive support.");
     return 0;
+#endif
+}
+
+#if LANDCLIP_WITH_GDAL
+namespace {
+
+/// Splits a JSON array of strings (`["/a","/b"]`) without pulling in a JSON
+/// parser. The values come from our own Swift code so the shape is trusted; only
+/// basic escapes are handled.
+std::vector<std::string> parse_json_string_array(const char *json) {
+    std::vector<std::string> values;
+    if (json == nullptr) return values;
+    const std::string text(json);
+    size_t index = 0;
+    while (index < text.size()) {
+        if (text[index] != '"') { ++index; continue; }
+        std::string value;
+        ++index;
+        while (index < text.size() && text[index] != '"') {
+            if (text[index] == '\\' && index + 1 < text.size()) {
+                ++index;
+                switch (text[index]) {
+                case 'n': value += '\n'; break;
+                case 't': value += '\t'; break;
+                case 'r': value += '\r'; break;
+                default: value += text[index];
+                }
+            } else {
+                value += text[index];
+            }
+            ++index;
+        }
+        ++index;
+        values.push_back(value);
+    }
+    return values;
+}
+
+struct LayerOutcome {
+    std::string gdb;
+    std::string source_layer;
+    std::string output_layer;
+    std::string geometry_type;
+    long long source_count = -1;
+    long long candidate_count = 0;
+    long long output_count = 0;
+    std::string status;
+    std::string message;
+};
+
+std::string sanitize_layer_name(const std::string &gdb_stem, const std::string &layer,
+                                std::vector<std::string> &used) {
+    std::string base;
+    for (char character : (gdb_stem + "_" + layer)) {
+        base += (std::isalnum(static_cast<unsigned char>(character)) || character == '_')
+                    ? character
+                    : '_';
+    }
+    while (base.size() > 1 && base.front() == '_') base.erase(base.begin());
+    while (!base.empty() && base.back() == '_') base.pop_back();
+    if (base.empty()) base = "layer";
+    if (base.size() > 55) base.resize(55);
+    std::string candidate = base;
+    int suffix = 2;
+    auto taken = [&](const std::string &name) {
+        for (const std::string &existing : used) {
+            if (existing.size() == name.size()) {
+                bool equal = true;
+                for (size_t i = 0; i < name.size(); ++i) {
+                    if (std::tolower(static_cast<unsigned char>(existing[i])) !=
+                        std::tolower(static_cast<unsigned char>(name[i]))) { equal = false; break; }
+                }
+                if (equal) return true;
+            }
+        }
+        return false;
+    };
+    while (taken(candidate)) {
+        candidate = base + "_" + std::to_string(suffix++);
+    }
+    used.push_back(candidate);
+    return candidate;
+}
+
+/// Reads every polygon from the AOI file, unions them and returns the geometry
+/// plus its spatial reference (both owned by the caller).
+bool load_aoi(const char *aoi_path, OGRGeometryH *out_geometry,
+              OGRSpatialReferenceH *out_srs, std::string *error) {
+    *out_geometry = nullptr;
+    *out_srs = nullptr;
+    DatasetGuard dataset;
+    dataset.handle = GDALOpenEx(aoi_path, GDAL_OF_VECTOR | GDAL_OF_READONLY, nullptr, nullptr, nullptr);
+    if (dataset.handle == nullptr) { *error = "Could not open the AOI file."; return false; }
+    OGRLayerH layer = GDALDatasetGetLayer(dataset.handle, 0);
+    if (layer == nullptr) { *error = "The AOI file has no layers."; return false; }
+
+    OGRSpatialReferenceH srs = OGR_L_GetSpatialRef(layer);
+    if (srs == nullptr) { *error = "The AOI file has no CRS."; return false; }
+
+    GeometryGuard accumulated;
+    OGR_L_ResetReading(layer);
+    OGRFeatureH feature = nullptr;
+    long long polygon_count = 0;
+    while ((feature = OGR_L_GetNextFeature(layer)) != nullptr) {
+        OGRGeometryH geometry = OGR_F_GetGeometryRef(feature);
+        if (geometry != nullptr) {
+            const OGRwkbGeometryType flat = wkbFlatten(OGR_G_GetGeometryType(geometry));
+            if (flat == wkbPolygon || flat == wkbMultiPolygon) {
+                OGRGeometryH part = OGR_G_IsValid(geometry) ? OGR_G_Clone(geometry)
+                                                           : OGR_G_MakeValid(geometry);
+                if (part != nullptr) {
+                    polygon_count += 1;
+                    if (accumulated.handle == nullptr) {
+                        accumulated.handle = part;
+                    } else {
+                        OGRGeometryH merged = OGR_G_Union(accumulated.handle, part);
+                        OGR_G_DestroyGeometry(part);
+                        if (merged != nullptr) {
+                            OGR_G_DestroyGeometry(accumulated.handle);
+                            accumulated.handle = merged;
+                        }
+                    }
+                }
+            }
+        }
+        OGR_F_Destroy(feature);
+    }
+    if (polygon_count == 0 || accumulated.handle == nullptr) {
+        *error = "The AOI file has no polygon features.";
+        return false;
+    }
+
+    *out_srs = OSRClone(srs);
+    *out_geometry = accumulated.release();
+    return true;
+}
+
+} // namespace
+#endif
+
+char *landclip_clip_package_json(const char *gdb_paths_json,
+                                 const char *aoi_path,
+                                 const char *out_gpkg_path,
+                                 const char *out_csv_path,
+                                 landclip_progress_callback progress,
+                                 void *progress_context,
+                                 char **error_message) {
+    if (error_message != nullptr) *error_message = nullptr;
+#if LANDCLIP_WITH_GDAL
+    if (gdb_paths_json == nullptr || aoi_path == nullptr || out_gpkg_path == nullptr ||
+        out_csv_path == nullptr) {
+        if (error_message != nullptr) *error_message = copy_string("Clip arguments are incomplete.");
+        return nullptr;
+    }
+
+    GDALAllRegister();
+    const std::vector<std::string> gdb_paths = parse_json_string_array(gdb_paths_json);
+    if (gdb_paths.empty()) {
+        if (error_message != nullptr) *error_message = copy_string("No geodatabase paths supplied.");
+        return nullptr;
+    }
+
+    report_progress(progress, progress_context,
+                    "{\"event\":\"phase\",\"phase\":\"aoi\"}");
+    GeometryGuard aoi;
+    OGRSpatialReferenceH aoi_srs = nullptr;
+    std::string load_error;
+    if (!load_aoi(aoi_path, &aoi.handle, &aoi_srs, &load_error)) {
+        if (error_message != nullptr) *error_message = copy_string(load_error.c_str());
+        return nullptr;
+    }
+    struct SrsGuard {
+        OGRSpatialReferenceH h = nullptr;
+        ~SrsGuard() { if (h != nullptr) OSRDestroySpatialReference(h); }
+    } aoi_srs_guard;
+    aoi_srs_guard.h = aoi_srs;
+
+    GDALDriverH gpkg_driver = GDALGetDriverByName("GPKG");
+    if (gpkg_driver == nullptr) {
+        if (error_message != nullptr) *error_message = copy_string("The GPKG driver is unavailable.");
+        return nullptr;
+    }
+    DatasetGuard out_dataset;
+    out_dataset.handle = GDALCreate(gpkg_driver, out_gpkg_path, 0, 0, 0, GDT_Unknown, nullptr);
+    if (out_dataset.handle == nullptr) {
+        if (error_message != nullptr) *error_message = copy_string("Could not create the output GeoPackage.");
+        return nullptr;
+    }
+
+    std::vector<LayerOutcome> outcomes;
+    std::vector<std::string> used_names;
+    bool cancelled = false;
+
+    report_progress(progress, progress_context,
+                    "{\"event\":\"phase\",\"phase\":\"process\"}");
+
+    for (const std::string &gdb_path : gdb_paths) {
+        if (cancelled) break;
+        std::string gdb_stem = gdb_path;
+        const size_t slash = gdb_stem.find_last_of("/\\");
+        if (slash != std::string::npos) gdb_stem = gdb_stem.substr(slash + 1);
+        const size_t dot = gdb_stem.find_last_of('.');
+        if (dot != std::string::npos) gdb_stem = gdb_stem.substr(0, dot);
+
+        const char *allowed[] = {"OpenFileGDB", nullptr};
+        DatasetGuard source;
+        source.handle = GDALOpenEx(gdb_path.c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY,
+                                   allowed, nullptr, nullptr);
+        if (source.handle == nullptr) {
+            LayerOutcome outcome;
+            outcome.gdb = gdb_stem;
+            outcome.status = "error";
+            outcome.message = "Could not open geodatabase.";
+            outcomes.push_back(outcome);
+            continue;
+        }
+
+        const int layer_count = GDALDatasetGetLayerCount(source.handle);
+        for (int index = 0; index < layer_count && !cancelled; ++index) {
+            OGRLayerH layer = GDALDatasetGetLayer(source.handle, index);
+            if (layer == nullptr) continue;
+            OGRFeatureDefnH defn = OGR_L_GetLayerDefn(layer);
+            const std::string layer_name = OGR_FD_GetName(defn);
+            const OGRwkbGeometryType geom_type = OGR_FD_GetGeomType(defn);
+            const std::string family = geometry_family(geom_type);
+
+            LayerOutcome outcome;
+            outcome.gdb = gdb_stem;
+            outcome.source_layer = layer_name;
+            outcome.geometry_type = geometry_type_name(geom_type);
+            outcome.source_count = OGR_L_GetFeatureCount(layer, false);
+
+            {
+                std::ostringstream event;
+                event << "{\"event\":\"layer_start\",\"gdb\":" << json_string(gdb_stem.c_str())
+                      << ",\"layer\":" << json_string(layer_name.c_str()) << "}";
+                if (report_progress(progress, progress_context, event.str())) { cancelled = true; break; }
+            }
+
+            OGRSpatialReferenceH layer_srs = OGR_L_GetSpatialRef(layer);
+            if (family.empty() || layer_srs == nullptr) {
+                outcome.status = "skipped";
+                outcome.message = family.empty() ? "unsupported geometry" : "layer has no CRS";
+                outcomes.push_back(outcome);
+                continue;
+            }
+
+            GeometryGuard local_aoi;
+            local_aoi.handle = OGR_G_Clone(aoi.handle);
+            if (!OSRIsSame(aoi_srs, layer_srs)) {
+                OGRCoordinateTransformationH transform =
+                    OCTNewCoordinateTransformation(aoi_srs, layer_srs);
+                if (transform == nullptr) {
+                    outcome.status = "skipped";
+                    outcome.message = "no transform to layer CRS";
+                    outcomes.push_back(outcome);
+                    continue;
+                }
+                const OGRErr err = OGR_G_Transform(local_aoi.handle, transform);
+                OCTDestroyCoordinateTransformation(transform);
+                if (err != OGRERR_NONE) {
+                    outcome.status = "skipped";
+                    outcome.message = "AOI transform failed";
+                    outcomes.push_back(outcome);
+                    continue;
+                }
+            }
+
+            OGR_L_SetSpatialFilter(layer, local_aoi.handle);
+            OGR_L_ResetReading(layer);
+
+            const std::string output_name = sanitize_layer_name(gdb_stem, layer_name, used_names);
+            outcome.output_layer = output_name;
+            OGRLayerH out_layer = nullptr;
+            const bool is_point = (family == "Point");
+
+            OGRFeatureH feature = nullptr;
+            while ((feature = OGR_L_GetNextFeature(layer)) != nullptr) {
+                outcome.candidate_count += 1;
+                OGRGeometryH geometry = OGR_F_GetGeometryRef(feature);
+                if (geometry == nullptr || !OGR_G_Intersects(geometry, local_aoi.handle)) {
+                    OGR_F_Destroy(feature);
+                    continue;
+                }
+                GeometryGuard result_geometry;
+                if (is_point) {
+                    result_geometry.handle = OGR_G_Clone(geometry);
+                } else {
+                    GeometryGuard repaired;
+                    OGRGeometryH usable = geometry;
+                    if (!OGR_G_IsValid(geometry)) {
+                        repaired.handle = OGR_G_MakeValid(geometry);
+                        usable = repaired.handle;
+                    }
+                    if (usable != nullptr) {
+                        result_geometry.handle = OGR_G_Intersection(usable, local_aoi.handle);
+                    }
+                }
+                if (result_geometry.handle == nullptr || OGR_G_IsEmpty(result_geometry.handle)) {
+                    OGR_F_Destroy(feature);
+                    continue;
+                }
+
+                if (out_layer == nullptr) {
+                    out_layer = GDALDatasetCreateLayer(out_dataset.handle, output_name.c_str(),
+                                                       layer_srs, wkbUnknown, nullptr);
+                    if (out_layer == nullptr) {
+                        outcome.status = "error";
+                        outcome.message = "could not create output layer";
+                        OGR_F_Destroy(feature);
+                        break;
+                    }
+                    for (int f = 0; f < OGR_FD_GetFieldCount(defn); ++f) {
+                        OGR_L_CreateField(out_layer, OGR_FD_GetFieldDefn(defn, f), TRUE);
+                    }
+                }
+
+                OGRFeatureH out_feature = OGR_F_Create(OGR_L_GetLayerDefn(out_layer));
+                OGR_F_SetFrom(out_feature, feature, TRUE);
+                OGR_F_SetGeometryDirectly(out_feature, result_geometry.release());
+                if (OGR_L_CreateFeature(out_layer, out_feature) == OGRERR_NONE) {
+                    outcome.output_count += 1;
+                }
+                OGR_F_Destroy(out_feature);
+                OGR_F_Destroy(feature);
+            }
+            OGR_L_SetSpatialFilter(layer, nullptr);
+
+            if (outcome.status.empty()) {
+                outcome.status = outcome.output_count > 0 ? "written" : "empty";
+            }
+            outcomes.push_back(outcome);
+
+            std::ostringstream event;
+            event << "{\"event\":\"layer_done\",\"gdb\":" << json_string(gdb_stem.c_str())
+                  << ",\"layer\":" << json_string(layer_name.c_str())
+                  << ",\"status\":" << json_string(outcome.status.c_str())
+                  << ",\"candidateCount\":" << outcome.candidate_count
+                  << ",\"outputCount\":" << outcome.output_count << "}";
+            if (report_progress(progress, progress_context, event.str())) { cancelled = true; }
+        }
+    }
+
+    // Flush the GeoPackage before anyone reads it back.
+    GDALClose(out_dataset.handle);
+    out_dataset.handle = nullptr;
+
+    if (cancelled) {
+        VSIUnlink(out_gpkg_path);
+        if (error_message != nullptr) *error_message = copy_string("Clip cancelled.");
+        return nullptr;
+    }
+
+    std::ofstream csv(out_csv_path, std::ios::binary);
+    csv << "gdb,source_layer,output_layer,geometry_type,source_count,candidate_count,"
+           "output_count,status,message\n";
+    long long written_layers = 0;
+    std::ostringstream summary;
+    summary << "{\"outputGeoPackage\":" << json_string(out_gpkg_path)
+            << ",\"summaryCsv\":" << json_string(out_csv_path) << ",\"layers\":[";
+    for (size_t i = 0; i < outcomes.size(); ++i) {
+        const LayerOutcome &outcome = outcomes[i];
+        if (outcome.status == "written") written_layers += 1;
+        csv << csv_cell(outcome.gdb) << ',' << csv_cell(outcome.source_layer) << ','
+            << csv_cell(outcome.output_layer) << ',' << csv_cell(outcome.geometry_type) << ','
+            << (outcome.source_count < 0 ? std::string() : std::to_string(outcome.source_count)) << ','
+            << outcome.candidate_count << ',' << outcome.output_count << ','
+            << csv_cell(outcome.status) << ',' << csv_cell(outcome.message) << '\n';
+        if (i > 0) summary << ',';
+        summary << "{\"gdb\":" << json_string(outcome.gdb.c_str())
+                << ",\"sourceLayer\":" << json_string(outcome.source_layer.c_str())
+                << ",\"outputLayer\":" << json_string(outcome.output_layer.c_str())
+                << ",\"geometryType\":" << json_string(outcome.geometry_type.c_str())
+                << ",\"sourceCount\":" << outcome.source_count
+                << ",\"candidateCount\":" << outcome.candidate_count
+                << ",\"outputCount\":" << outcome.output_count
+                << ",\"status\":" << json_string(outcome.status.c_str())
+                << ",\"message\":" << json_string(outcome.message.c_str()) << '}';
+    }
+    summary << "],\"writtenLayerCount\":" << written_layers << "}";
+    csv.close();
+
+    report_progress(progress, progress_context, "{\"event\":\"complete\"}");
+    return copy_string(summary.str().c_str());
+#else
+    (void)gdb_paths_json;
+    (void)aoi_path;
+    (void)out_gpkg_path;
+    (void)out_csv_path;
+    (void)progress;
+    (void)progress_context;
+    if (error_message != nullptr) *error_message = copy_string("GISCore was built without GDAL.");
+    return nullptr;
 #endif
 }
