@@ -27,12 +27,24 @@ cloud và không phụ thuộc LandClip Windows.
 - [x] Có script CI build GDAL/PROJ/GEOS/SQLite cho device + simulator.
 - [x] Có cấu hình link XCFramework và bật `LANDCLIP_WITH_GDAL=1`.
 - [x] Copy GDAL/PROJ resource data vào app bundle và cấu hình runtime search path.
-- [ ] Xác minh workflow native build xanh trên GitHub macOS runner.
-- [ ] Thêm fixture `.gdb` công khai và integration test OpenFileGDB thật.
-- [ ] Ghi nhận phiên bản và license chính xác của binary được chốt.
+- [x] Xác minh workflow native build xanh trên GitHub macOS runner.
+- [x] Thêm fixture `.gdb` công khai và integration test OpenFileGDB thật.
+- [x] Ghi nhận phiên bản và license chính xác của binary được chốt —
+  [`DEPENDENCIES.md`](DEPENDENCIES.md).
 
 Không bật macro trước khi XCFramework được link: nhánh fallback là chủ ý để CI
 scaffold vẫn kiểm tra được Swift/C ABI, nhưng không được xem là pass Giai đoạn 1.
+
+Workflow `Native iPad PoC` đã chạy xanh trên `macos-15` / Xcode 16.4: build 5
+XCFramework (GDAL 3.11.4, PROJ 9.6.2, GEOS 3.14.1, SQLite 3.50.4, libarchive
+3.8.9) cho `ios-arm64` + `ios-arm64-simulator`, link vào app với
+`LANDCLIP_WITH_GDAL=1`, và 4 unit test pass — trong đó `testNativeOpenFileGDBCatalog`
+đọc `.gdb` thật bằng OpenFileGDB và `testNativePPKXEndToEnd` chạy trọn pipeline
+copy → giải nén ZIP → tìm `.gdb` → catalog.
+
+Việc còn mở (không chặn Giai đoạn 1, xem [`DEPENDENCIES.md`](DEPENDENCIES.md)):
+chốt cách xử lý GEOS/LGPL-2.1 theo kênh phân phối, pin SHA256 cho 5 nguồn tải,
+tạo `THIRD_PARTY_LICENSES` khi chuẩn bị phân phối.
 
 ## Giai đoạn 2 — catalog thật
 
