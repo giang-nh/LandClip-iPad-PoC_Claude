@@ -9,5 +9,6 @@ LandClipIPad.xcodeproj/
 *.xcuserstate
 xcuserdata/
 Vendor/*.xcframework
+Vendor/Headers/
 Vendor/Resources/
 Fixtures/private/

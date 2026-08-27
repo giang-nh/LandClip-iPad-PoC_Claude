@@ -42,10 +42,7 @@ targets:
         GCC_PREPROCESSOR_DEFINITIONS: "$(inherited) LANDCLIP_WITH_GDAL=1"
         HEADER_SEARCH_PATHS:
           - "$(inherited)"
-          - "$(PROJECT_DIR)/Vendor/GDAL.xcframework/ios-arm64/Headers"
-          - "$(PROJECT_DIR)/Vendor/GDAL.xcframework/ios-arm64-simulator/Headers"
-          - "$(PROJECT_DIR)/Vendor/Archive.xcframework/ios-arm64/Headers"
-          - "$(PROJECT_DIR)/Vendor/Archive.xcframework/ios-arm64-simulator/Headers"
+          - "$(PROJECT_DIR)/Vendor/Headers"
         OTHER_LDFLAGS:
           - "$(inherited)"
           - -lc++

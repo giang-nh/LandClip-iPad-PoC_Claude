@@ -152,23 +152,33 @@ build_slice "ios-arm64" "iphoneos" "iphoneos" "arm64-apple-ios${DEPLOYMENT_TARGE
 build_slice "ios-arm64-simulator" "iphonesimulator" "iphonesimulator" \
   "arm64-apple-ios${DEPLOYMENT_TARGET}-simulator"
 
+# Header-less static-library XCFrameworks. All five libraries were installed into
+# the same prefix, so bundling ${prefix}/include inside each XCFramework made
+# Xcode copy the same header from several frameworks into $BUILT_PRODUCTS_DIR and
+# fail with "Multiple commands produce .../include/proj.h". The app only needs the
+# GDAL and libarchive C headers, shipped once as a plain directory that
+# project-native.yml adds to HEADER_SEARCH_PATHS.
 create_xcframework() {
   local name="$1"
   local library="$2"
-  local headers="$3"
   xcodebuild -create-xcframework \
     -library "${WORK_DIR}/install/ios-arm64/lib/${library}" \
-    -headers "${WORK_DIR}/install/ios-arm64/${headers}" \
     -library "${WORK_DIR}/install/ios-arm64-simulator/lib/${library}" \
-    -headers "${WORK_DIR}/install/ios-arm64-simulator/${headers}" \
     -output "${OUTPUT_DIR}/${name}.xcframework"
 }
 
-create_xcframework SQLite libsqlite3.a include
-create_xcframework PROJ libproj.a include
-create_xcframework GEOS libgeos_combined.a include
-create_xcframework GDAL libgdal.a include
-create_xcframework Archive libarchive.a include
+create_xcframework SQLite libsqlite3.a
+create_xcframework PROJ libproj.a
+create_xcframework GEOS libgeos_combined.a
+create_xcframework GDAL libgdal.a
+create_xcframework Archive libarchive.a
+
+# Public C headers needed to compile GISCore against GDAL + libarchive. Taken
+# from the device slice (identical to the simulator slice for these C APIs).
+HEADERS_OUT="${OUTPUT_DIR}/Headers"
+rm -rf "${HEADERS_OUT}"
+mkdir -p "${HEADERS_OUT}"
+cp -R "${WORK_DIR}/install/ios-arm64/include/." "${HEADERS_OUT}/"
 
 mkdir -p "${OUTPUT_DIR}/Resources"
 cp -R "${WORK_DIR}/install/ios-arm64/share/proj" "${OUTPUT_DIR}/Resources/proj"
