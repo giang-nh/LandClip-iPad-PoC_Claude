@@ -56,10 +56,18 @@ build_slice() {
   sdk_path="$(xcrun --sdk "${sdk}" --show-sdk-path)"
   mkdir -p "${prefix}/include" "${prefix}/lib" "${build_root}"
 
+  # GDAL's GPKG driver links against the full SQLite C API: column metadata
+  # (sqlite3_column_table_name, ...), the load-extension entry points (which it
+  # only calls to switch extension loading *off*), R*Tree for the spatial index
+  # and FTS5. Omitting these leaves undefined symbols at app link time.
   xcrun --sdk "${sdk}" clang \
     -target "${clang_target}" \
     -isysroot "${sdk_path}" \
-    -O2 -fPIC -DSQLITE_OMIT_LOAD_EXTENSION=1 \
+    -O2 -fPIC \
+    -DSQLITE_ENABLE_COLUMN_METADATA=1 \
+    -DSQLITE_ENABLE_RTREE=1 \
+    -DSQLITE_ENABLE_FTS5=1 \
+    -DSQLITE_ENABLE_GEOPOLY=1 \
     -c "${SOURCE_DIR}/sqlite-amalgamation-${SQLITE_VERSION}/sqlite3.c" \
     -o "${build_root}/sqlite3.o"
   libtool -static -o "${prefix}/lib/libsqlite3.a" "${build_root}/sqlite3.o"
