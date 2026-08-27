@@ -104,16 +104,17 @@ build_slice() {
 
   cmake -S "${SOURCE_DIR}/libarchive-${LIBARCHIVE_VERSION}" -B "${build_root}/libarchive" \
     "${common_cmake[@]}" \
-    -DENABLE_SHARED=OFF \
-    -DENABLE_STATIC=ON \
     -DENABLE_TEST=OFF \
     -DENABLE_TAR=OFF \
     -DENABLE_CPIO=OFF \
     -DENABLE_CAT=OFF \
     -DENABLE_UNZIP=OFF \
+    -DENABLE_ACL=OFF \
+    -DENABLE_XATTR=OFF \
     -DENABLE_OPENSSL=OFF \
     -DENABLE_MBEDTLS=OFF \
     -DENABLE_NETTLE=OFF \
+    -DENABLE_LIBB2=OFF \
     -DENABLE_LIBXML2=OFF \
     -DENABLE_EXPAT=OFF \
     -DENABLE_LZMA=OFF \

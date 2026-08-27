@@ -12,10 +12,10 @@
 #if LANDCLIP_WITH_GDAL
 #include <archive.h>
 #include <archive_entry.h>
-#include <gdal/cpl_conv.h>
-#include <gdal/gdal.h>
-#include <gdal/ogr_api.h>
-#include <gdal/ogr_srs_api.h>
+#include <cpl_conv.h>
+#include <gdal.h>
+#include <ogr_api.h>
+#include <ogr_srs_api.h>
 #endif
 
 namespace {
