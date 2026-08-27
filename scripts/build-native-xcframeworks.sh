@@ -17,10 +17,20 @@ OUTPUT_DIR="${ROOT_DIR}/Vendor"
 rm -rf "${WORK_DIR}" "${OUTPUT_DIR}"
 mkdir -p "${SOURCE_DIR}" "${OUTPUT_DIR}"
 
+# Pinned SHA-256 of every source archive (see docs/DEPENDENCIES.md). A mismatch
+# means upstream re-cut the release or the download was tampered with — fail hard.
+SQLITE_SHA256="1d3049dd0f830a025a53105fc79fd2ab9431aea99e137809d064d8ee8356b032"
+PROJ_SHA256="53d0cafaee3bb2390264a38668ed31d90787de05e71378ad7a8f35bb34c575d1"
+GEOS_SHA256="3c20919cda9a505db07b5216baa980bacdaa0702da715b43f176fb07eff7e716"
+GDAL_SHA256="0fa36ee34d4451db586d2bf78ea0dbfa3b0dfae0516587f8130d21add0ac9dad"
+LIBARCHIVE_SHA256="f5a6539059cf5e597dbeda37bfa4874b1e8dea063c8d93bf85a2b44af90a5bd4"
+
 download_and_extract() {
   local url="$1"
   local archive="$2"
+  local sha256="$3"
   curl --fail --location --retry 3 --output "${WORK_DIR}/${archive}" "${url}"
+  echo "${sha256}  ${WORK_DIR}/${archive}" | shasum -a 256 -c -
   case "${archive}" in
     *.zip) unzip -q "${WORK_DIR}/${archive}" -d "${SOURCE_DIR}" ;;
     *.tar.gz) tar -xzf "${WORK_DIR}/${archive}" -C "${SOURCE_DIR}" ;;
@@ -31,19 +41,19 @@ download_and_extract() {
 
 download_and_extract \
   "https://www.sqlite.org/${SQLITE_YEAR}/sqlite-amalgamation-${SQLITE_VERSION}.zip" \
-  "sqlite.zip"
+  "sqlite.zip" "${SQLITE_SHA256}"
 download_and_extract \
   "https://github.com/OSGeo/PROJ/releases/download/${PROJ_VERSION}/proj-${PROJ_VERSION}.tar.gz" \
-  "proj.tar.gz"
+  "proj.tar.gz" "${PROJ_SHA256}"
 download_and_extract \
   "https://github.com/libgeos/geos/releases/download/${GEOS_VERSION}/geos-${GEOS_VERSION}.tar.bz2" \
-  "geos.tar.bz2"
+  "geos.tar.bz2" "${GEOS_SHA256}"
 download_and_extract \
   "https://github.com/OSGeo/gdal/releases/download/v${GDAL_VERSION}/gdal-${GDAL_VERSION}.tar.gz" \
-  "gdal.tar.gz"
+  "gdal.tar.gz" "${GDAL_SHA256}"
 download_and_extract \
-  "https://github.com/libarchive/libarchive/archive/refs/tags/v${LIBARCHIVE_VERSION}.tar.gz" \
-  "libarchive.tar.gz"
+  "https://github.com/libarchive/libarchive/releases/download/v${LIBARCHIVE_VERSION}/libarchive-${LIBARCHIVE_VERSION}.tar.gz" \
+  "libarchive.tar.gz" "${LIBARCHIVE_SHA256}"
 
 build_slice() {
   local slice="$1"
@@ -148,6 +158,7 @@ build_slice() {
     -DOGR_BUILD_OPTIONAL_DRIVERS=OFF \
     -DOGR_ENABLE_DRIVER_OPENFILEGDB=ON \
     -DOGR_ENABLE_DRIVER_GPKG=ON \
+    -DOGR_ENABLE_DRIVER_GEOJSON=ON \
     -DGDAL_USE_EXTERNAL_LIBS=OFF \
     -DGDAL_USE_GEOS=ON \
     -DGDAL_USE_SQLITE3=ON \

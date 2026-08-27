@@ -42,9 +42,11 @@ XCFramework (GDAL 3.11.4, PROJ 9.6.2, GEOS 3.14.1, SQLite 3.50.4, libarchive
 đọc `.gdb` thật bằng OpenFileGDB và `testNativePPKXEndToEnd` chạy trọn pipeline
 copy → giải nén ZIP → tìm `.gdb` → catalog.
 
-Việc còn mở (không chặn Giai đoạn 1, xem [`DEPENDENCIES.md`](DEPENDENCIES.md)):
-chốt cách xử lý GEOS/LGPL-2.1 theo kênh phân phối, pin SHA256 cho 5 nguồn tải,
-tạo `THIRD_PARTY_LICENSES` khi chuẩn bị phân phối.
+Đã bổ sung: SHA-256 pin cho 5 nguồn tải trong build script, driver GeoJSON,
+[`THIRD_PARTY_LICENSES/`](../THIRD_PARTY_LICENSES/) (full text + written offer GEOS),
+và quyết định GEOS/LGPL cho bản PoC (giữ static, không phân phối — điều kiện phân
+phối ghi trong [`DEPENDENCIES.md`](DEPENDENCIES.md)). Việc chuyển sang phân phối
+thật (GEOS động hoặc relink-kit, màn Acknowledgements) để lại cho Giai đoạn 3.
 
 ## Giai đoạn 2 — catalog thật
 
