@@ -1,12 +1,12 @@
 # Native dependencies — phiên bản & license
 
-**Cập nhật:** 2026-08-27
+**Cập nhật:** 2026-08-28
 **Nguồn chốt phiên bản:** [`scripts/build-native-xcframeworks.sh`](../scripts/build-native-xcframeworks.sh)
 
 PoC nối 5 thư viện native (build static, iOS `arm64` device + `arm64` simulator, đóng
-thành XCFramework trong `Vendor/`). Tài liệu này ghi phiên bản chính xác được chốt và
-đánh giá nghĩa vụ license **trước khi phân phối** ứng dụng — theo yêu cầu Giai đoạn 1
-trong [`POC_PLAN.md`](POC_PLAN.md).
+thành XCFramework trong `Vendor/`; header GDAL + libarchive nằm trong `Vendor/Headers/`).
+Tài liệu này ghi phiên bản chính xác được chốt và đánh giá nghĩa vụ license **trước khi
+phân phối** ứng dụng.
 
 ## Bảng tổng hợp
 
@@ -48,10 +48,10 @@ Script build **tối giản** để giảm bề mặt license và kích thước
 - `GDAL_BUILD_OPTIONAL_DRIVERS=OFF`, `OGR_BUILD_OPTIONAL_DRIVERS=OFF` — tắt toàn bộ
   driver mặc định.
 - Chỉ bật: `OGR_ENABLE_DRIVER_OPENFILEGDB=ON`, `OGR_ENABLE_DRIVER_GPKG=ON`,
-  `OGR_ENABLE_DRIVER_GEOJSON=ON`, `OGR_ENABLE_DRIVER_DXF=ON` (đọc AOI từ DXF; driver
-  MIT, thuộc GDAL).
-  - Runtime còn giới hạn thêm bằng `allowed_drivers = {"OpenFileGDB"}` trong
-    [`GISCore.cpp`](../GISCore/Sources/GISCore.cpp) khi mở dataset.
+  `OGR_ENABLE_DRIVER_GEOJSON=ON`, `OGR_ENABLE_DRIVER_DXF=ON` (đọc AOI từ DXF; các
+  driver này đều MIT, thuộc GDAL).
+  - Khi mở **`.gdb`**, `GISCore.cpp` còn ép `allowed_drivers = {"OpenFileGDB"}`.
+    AOI (`.geojson`/`.gpkg`/`.dxf`) và GeoPackage kết quả mở tự do trong 4 driver trên.
 - `GDAL_USE_EXTERNAL_LIBS=OFF` — GDAL dùng bản nhúng nội bộ (json-c…) thay vì lib hệ
   thống, nên không kéo thêm license ngoài.
 - libarchive: tắt hầu hết format/filter, chỉ giữ đủ để giải nén ZIP
@@ -114,7 +114,8 @@ bundle chúng vào **thư mục `proj/` và `gdal/` ở gốc `.app`** (không p
 | `proj/` | `proj.db`, `proj.ini`, vài file cấu hình (KHÔNG có grid projsync — `BUILD_PROJSYNC=OFF`, `ENABLE_CURL=OFF`) | `proj.db` tổng hợp từ **EPSG Dataset** + ESRI + IGNF… — EPSG Terms of Use: dùng & phân phối lại **kèm ghi nguồn**, không sửa mà vẫn gọi là "EPSG". File còn lại theo PROJ (MIT) |
 | `gdal/` | Bảng CSV, template… của GDAL | Phần lớn MIT; một phần dẫn xuất từ EPSG (ghi nguồn như trên) |
 
-Cần đưa ghi nguồn EPSG + danh sách 5 component vào màn "Acknowledgements / Legal".
+Màn **"Ghi nhận & Pháp lý"** trong app (`AcknowledgementsView`, nút ⓘ) đã nêu 5
+component + version + license + ghi nguồn EPSG + ghi chú GEOS/LGPL.
 
 ## Trạng thái checklist Giai đoạn 1
 

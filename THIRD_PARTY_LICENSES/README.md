@@ -33,8 +33,8 @@ EPSG attribution.
 ## GEOS (LGPL-2.1) — compliance status
 
 GEOS is currently linked **statically** (into `libgdal.a` via `GDAL_USE_GEOS=ON`,
-then into the app binary). The catalog code in this PoC does not call GEOS yet;
-it is retained because Phase 3 (the AOI spatial engine) needs it.
+then into the app binary). The AOI clip engine uses it (via OGR: `MakeValid`,
+`Intersection`, ...).
 
 **Current status:** this PoC is *not distributed* — it is built and tested only on
 CI for internal evaluation (see `docs/02_product_requirement.md`: "Đối tượng dùng
@@ -49,6 +49,6 @@ ban đầu: Nội bộ, số lượng nhỏ"). Static linking is acceptable in t
    script — so a user can rebuild the app against a modified GEOS, and include a
    prominent notice + this LGPL-2.1 text.
 
-Option 1 is the intended path and should be decided as part of the Phase 3
-architecture. Until then, do not distribute a build produced with the current
-static configuration.
+Option 1 is the intended path — exact steps in
+[`docs/GEOS_DYNAMIC_PLAN.md`](../docs/GEOS_DYNAMIC_PLAN.md). Until then, do not
+distribute a build produced with the current static configuration.

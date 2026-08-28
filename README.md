@@ -1,52 +1,92 @@
 # LandClip iPad PoC
 
-Project thử nghiệm độc lập để đánh giá khả năng đọc và xử lý `.ppkx` hoàn toàn trên
-iPad. Project này không phụ thuộc source, binary hay runtime của LandClip Windows.
+Bản thử nghiệm độc lập chứng minh: có thể đọc và **clip** một ArcGIS Project Package
+(`.ppkx`) hoàn toàn **trên iPad**, không backend, không gửi dữ liệu ra cloud, không phụ
+thuộc source/binary/runtime của LandClip Windows.
 
-## Mục tiêu PoC đầu tiên
+Port phần lõi của công cụ `landclip` (Windows) sang iPad: chọn 1 AOI → tự động clip mọi
+vector layer trong `.ppkx` → xuất 1 GeoPackage nhiều layer + 1 CSV tổng hợp.
 
-1. Chọn một file `.ppkx` từ ứng dụng Files.
-2. Sao chép file vào sandbox của ứng dụng.
-3. Giải nén package bằng thư viện native.
-4. Tìm các thư mục `.gdb`.
-5. Dùng GDAL/OpenFileGDB đọc danh sách layer.
-6. Hiển thị catalog layer và số liệu hiệu năng.
+## Làm được gì
 
-Build scaffold mặc định (`project.yml`) giữ `LANDCLIP_WITH_GDAL=0` và dùng
-`MockPackageScanner`, nên CI nhanh không vô tình báo thành công khi chưa có binary
-native. Build native (`project-native.yml`) đặt `LANDCLIP_WITH_GDAL=1`, link 5
-XCFramework và chạy `NativePackageScanner` thật.
+- **Đọc `.ppkx`**: copy streaming vào sandbox → giải nén (ZIP + 7z, libarchive) → tìm
+  mọi `.gdb` → catalog layer (tên, geometry, CRS, feature count). Có progress + huỷ.
+- **AOI**: vẽ đa giác / hình chữ nhật trên bản đồ vệ tinh (MapKit), hoặc nhập file
+  **GeoJSON / GeoPackage / DXF** (DXF đọc WKT hệ toạ độ nhúng trong comment `999`).
+- **Clip engine** (`landclip_clip_package_json`, chạy trọn trong C++ qua OGR):
+  transform AOI sang CRS từng layer → lọc bbox → intersect chính xác →
+  **Point/MultiPoint = Select**, **Line/Polygon = Clip** → giữ nguyên thuộc tính.
+  Fault isolation (1 layer lỗi không sập job), huỷ theo ranh giới layer, `MakeValid`
+  hình học lỗi.
+- **Chọn / bỏ chọn** từng layer trước khi clip.
+- **Kết quả**: danh sách tổng hợp + lọc text, diện tích/chu vi AOI, share GeoPackage + CSV
+  ra Files, preview từng layer trên bản đồ + bảng thuộc tính.
+- **Tự tiếp tục sau khi dừng** (append vào GeoPackage cũ, bỏ qua layer đã xong).
+- **Đánh giá Đúng/Sai** theo layer và theo đối tượng (lưu on-device).
+- **Khai báo tên người dùng** (local, không auth) + **nhật ký hoạt động on-device**
+  (`audit.jsonl`, có SHA-256 của PPKX) — không gửi đi đâu.
 
-`GISCore` có C ABI để mở một thư mục `.gdb` bằng đúng driver `OpenFileGDB` và trả
-catalog JSON cho `NativeGeodatabaseReader`, cùng hàm giải nén `.ppkx` (ZIP) qua
-libarchive.
+Toàn bộ dữ liệu nằm trên iPad; chỉ ảnh nền bản đồ cần Internet.
 
-Không cần máy Mac cục bộ để build native. Workflow `Native iPad PoC` chạy script
-`scripts/build-native-xcframeworks.sh` trên GitHub macOS runner, cache 5 XCFramework
-(GDAL, PROJ, GEOS, SQLite, libarchive), generate project từ `project-native.yml`,
-rồi chạy unit test trên iPad Simulator. Có thể chạy thủ công từ tab Actions bằng
-`workflow_dispatch`. Trạng thái Giai đoạn 1 và license dependency: xem
-[`docs/POC_PLAN.md`](docs/POC_PLAN.md) và [`docs/DEPENDENCIES.md`](docs/DEPENDENCIES.md).
+## Kiến trúc
 
-## Yêu cầu build
+| Tầng | | |
+|---|---|---|
+| UI | SwiftUI + MapKit (`App/Views`, `App/ViewModels`) | chọn file, vẽ AOI, progress, kết quả, đánh giá |
+| Cầu nối | C ABI thuần trong [`GISCore/Sources/GISCore.h`](GISCore/Sources/GISCore.h) | Swift chỉ thấy `char*`/`int`, không kiểu C++/GDAL nào lọt qua |
+| Engine | C++ (`GISCore/Sources/GISCore.cpp`) | libarchive (giải nén), GDAL/OGR + GEOS + PROJ (đọc gdb, transform, clip, ghi GPKG) |
 
-- macOS và Xcode phiên bản hiện hành.
-- XcodeGen (`brew install xcodegen`).
-- iPadOS deployment target 17.0 trở lên.
+Hàm C ABI chính: `landclip_gis_copy_gdb_catalog_json` (catalog), `landclip_archive_extract_ppkx`
+(giải nén), `landclip_clip_package_json` (clip), `landclip_read_layer_geojson` (preview).
+Tất cả nhận callback progress/cancel dùng chung.
+
+Build scaffold (`project.yml`) đặt `LANDCLIP_WITH_GDAL=0` + `MockPackageScanner` để CI
+nhanh không cần binary native. Build native (`project-native.yml`) đặt
+`LANDCLIP_WITH_GDAL=1`, link 5 XCFramework và chạy engine thật.
+
+## CI / workflow (GitHub Actions, `macos-15` / Xcode 16.4)
+
+| Workflow | Việc |
+|---|---|
+| `iPad PoC` (`ios.yml`) | build scaffold + unit test, chạy mọi push |
+| `Native iPad PoC` (`native-ios.yml`) | build 5 XCFramework từ source (cache) + 10 unit test với GDAL thật |
+| `UI preview` (`ui-preview.yml`) | chạy app trong iPad simulator, tự thao tác hết luồng, xuất **screenshots + video** (không cần tài khoản Apple) |
+| `TestFlight` (`testflight.yml`) | archive + đẩy lên TestFlight qua App Store Connect API key (cần Apple Developer account — xem `docs/TESTFLIGHT_VI.md`) |
+
+Không cần máy Mac cục bộ. Chạy các workflow thủ công từ tab **Actions**.
+
+Build local (nếu có Mac):
 
 ```bash
-xcodegen generate
+xcodegen generate --spec project-native.yml   # cần Vendor/ đã có sẵn từ script
 xcodebuild -project LandClipIPad.xcodeproj -scheme LandClipIPad \
-  -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M4)' test
+  -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M4)' \
+  -skip-testing:LandClipIPadUITests test
 ```
+
+## Native dependencies
+
+GDAL 3.11.4 · PROJ 9.6.2 · GEOS 3.14.1 · SQLite 3.50.4 · libarchive 3.8.9 — build static
+cho `ios-arm64` + `ios-arm64-simulator` bằng
+[`scripts/build-native-xcframeworks.sh`](scripts/build-native-xcframeworks.sh) (SHA-256
+pin cho cả 5 nguồn). GDAL bật driver **OpenFileGDB + GPKG + GeoJSON + DXF**, runtime còn
+giới hạn `OpenFileGDB` khi mở dataset.
+
+Phiên bản + giấy phép + nghĩa vụ phân phối: [`docs/DEPENDENCIES.md`](docs/DEPENDENCIES.md)
+và [`THIRD_PARTY_LICENSES/`](THIRD_PARTY_LICENSES/).
+
+## Tài liệu
+
+- [`docs/POC_PLAN.md`](docs/POC_PLAN.md) — kế hoạch + trạng thái từng giai đoạn + tiêu chí pass
+- [`docs/DEPENDENCIES.md`](docs/DEPENDENCIES.md) — version + license native deps
+- [`docs/TESTFLIGHT_VI.md`](docs/TESTFLIGHT_VI.md) — đưa app lên iPad khi không có Mac
+- [`docs/GEOS_DYNAMIC_PLAN.md`](docs/GEOS_DYNAMIC_PLAN.md) — chuyển GEOS sang liên kết động (LGPL) trước khi phân phối
+- [`docs/ARCGIS_VALIDATION_VI.md`](docs/ARCGIS_VALIDATION_VI.md) — quy trình đối chứng kết quả với ArcGIS Pro
 
 ## Nguyên tắc
 
 - Một job xử lý tại một thời điểm.
-- Đọc feature theo batch, không nạp toàn bộ layer vào RAM.
-- Lưu checkpoint sau mỗi layer.
-- Tất cả dữ liệu nằm trên iPad, không gửi PPKX ra máy chủ.
-- SwiftUI phụ trách UX; C/C++ phụ trách 7z, GDAL, PROJ và GEOS.
-
-Xem [docs/POC_PLAN.md](docs/POC_PLAN.md) để biết tiêu chí nghiệm thu và trạng thái
-tích hợp dependency.
+- Đọc feature theo iterator, không nạp cả layer vào RAM.
+- Lưu kết quả sau mỗi layer (resume).
+- Tất cả dữ liệu nằm trên iPad, không gửi PPKX/geometry/thuộc tính ra máy chủ.
+- SwiftUI phụ trách UX; C/C++ phụ trách giải nén, GDAL, PROJ, GEOS.

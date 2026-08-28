@@ -78,9 +78,9 @@ Vào <https://developer.apple.com/account> → mục **Membership details** →
    <https://appstoreconnect.apple.com/apps> → app → tab **TestFlight**.
    Bản build mới hiện trạng thái "Processing" (~5–15 phút) rồi chuyển sang sẵn sàng.
 
-> Nếu Apple hỏi **Export Compliance** cho bản build: chọn **không dùng mã hóa non‑exempt**
-> (app chỉ dùng HTTPS chuẩn cho tile bản đồ). Có thể set sẵn bằng cách thêm khóa
-> `ITSAppUsesNonExemptEncryption = NO` — báo lại nếu muốn mình thêm vào `project-native.yml`.
+> Export Compliance đã set sẵn `ITSAppUsesNonExemptEncryption = NO` trong
+> `project-native.yml` (app chỉ dùng HTTPS chuẩn cho tile bản đồ), nên thường Apple
+> không hỏi. Nếu vẫn hỏi → chọn "không dùng mã hóa non‑exempt".
 
 ## 7. Thêm mình vào Internal Testing
 

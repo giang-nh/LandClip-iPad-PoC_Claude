@@ -1,11 +1,15 @@
-# Kế hoạch PoC đọc PPKX trực tiếp trên iPad
+# Kế hoạch PoC — clip PPKX trực tiếp trên iPad
 
 ## Phạm vi
 
-PoC chứng minh chuỗi xử lý native trên iPad. Không dùng backend, không gửi PPKX lên
-cloud và không phụ thuộc LandClip Windows.
+PoC chứng minh: đọc **và clip** một `.ppkx` (chọn AOI → clip mọi vector layer → xuất
+GeoPackage + CSV) hoàn toàn trên iPad. Không backend, không gửi PPKX/geometry/thuộc
+tính lên cloud, không phụ thuộc LandClip Windows.
 
-## Giai đoạn 0 — scaffold
+**Trạng thái:** Giai đoạn 0–3 xong, CI xanh (10 unit test + 1 UI walkthrough). Còn 2
+việc cần thiết bị/tài khoản của người dùng — xem cuối Giai đoạn 3.
+
+## Giai đoạn 0 — scaffold ✅
 
 - SwiftUI app chỉ dành cho iPad.
 - Chọn `.ppkx` bằng document picker.
@@ -13,10 +17,11 @@ cloud và không phụ thuộc LandClip Windows.
 - C ABI để nối C++ engine.
 - CI build bằng macOS simulator.
 
-## Giai đoạn 1 — native dependencies
+## Giai đoạn 1 — native dependencies ✅
 
-- Build XCFramework cho GDAL, PROJ, GEOS, SQLite và thư viện 7z.
-- Chỉ bật các driver OpenFileGDB, GPKG và GeoJSON.
+- Build XCFramework cho GDAL, PROJ, GEOS, SQLite và **libarchive**.
+- Bật driver **OpenFileGDB, GPKG, GeoJSON, DXF** (runtime giới hạn `OpenFileGDB` khi
+  mở gdb).
 - Kiểm tra license của dependency trước khi phân phối.
 
 ### Trạng thái tích hợp
@@ -35,20 +40,19 @@ cloud và không phụ thuộc LandClip Windows.
 Không bật macro trước khi XCFramework được link: nhánh fallback là chủ ý để CI
 scaffold vẫn kiểm tra được Swift/C ABI, nhưng không được xem là pass Giai đoạn 1.
 
-Workflow `Native iPad PoC` đã chạy xanh trên `macos-15` / Xcode 16.4: build 5
-XCFramework (GDAL 3.11.4, PROJ 9.6.2, GEOS 3.14.1, SQLite 3.50.4, libarchive
-3.8.9) cho `ios-arm64` + `ios-arm64-simulator`, link vào app với
-`LANDCLIP_WITH_GDAL=1`, và 4 unit test pass — trong đó `testNativeOpenFileGDBCatalog`
-đọc `.gdb` thật bằng OpenFileGDB và `testNativePPKXEndToEnd` chạy trọn pipeline
-copy → giải nén ZIP → tìm `.gdb` → catalog.
+Workflow `Native iPad PoC` xanh trên `macos-15` / Xcode 16.4: build 5 XCFramework
+(GDAL 3.11.4, PROJ 9.6.2, GEOS 3.14.1, SQLite 3.50.4, libarchive 3.8.9) cho
+`ios-arm64` + `ios-arm64-simulator`, link vào app với `LANDCLIP_WITH_GDAL=1`, 10
+unit test pass — gồm `testNativeOpenFileGDBCatalog` (đọc `.gdb` thật) và
+`testNativePPKXEndToEnd` (trọn pipeline copy → giải nén → tìm `.gdb` → catalog).
 
-Đã bổ sung: SHA-256 pin cho 5 nguồn tải trong build script, driver GeoJSON,
-[`THIRD_PARTY_LICENSES/`](../THIRD_PARTY_LICENSES/) (full text + written offer GEOS),
-và quyết định GEOS/LGPL cho bản PoC (giữ static, không phân phối — điều kiện phân
-phối ghi trong [`DEPENDENCIES.md`](DEPENDENCIES.md)). Việc chuyển sang phân phối
-thật (GEOS động hoặc relink-kit, màn Acknowledgements) để lại cho Giai đoạn 3.
+Đã pin SHA-256 cho 5 nguồn tải; bật driver GeoJSON + DXF;
+[`THIRD_PARTY_LICENSES/`](../THIRD_PARTY_LICENSES/) đủ full text 5 license + written
+offer GEOS. GEOS hiện link **static** — chấp nhận được cho bản PoC không phân phối;
+điều kiện + cách xử lý trước khi phát hành: [`DEPENDENCIES.md`](DEPENDENCIES.md) và
+[`GEOS_DYNAMIC_PLAN.md`](GEOS_DYNAMIC_PLAN.md).
 
-## Giai đoạn 2 — catalog thật
+## Giai đoạn 2 — catalog thật ✅
 
 - [x] Sao chép PPKX vào sandbox theo luồng streaming (`NativePackageScanner.copyStreaming`).
 - [x] Giải nén vào `Library/Caches` (libarchive, hỗ trợ ZIP + 7z).
@@ -59,7 +63,7 @@ thật (GEOS động hoặc relink-kit, màn Acknowledgements) để lại cho G
 `prepare()` giữ lại thư mục đã giải nén cho Giai đoạn 3 dùng lại (không giải nén 2 lần);
 caller chịu trách nhiệm dọn.
 
-## Giai đoạn 3 — clip theo AOI
+## Giai đoạn 3 — clip theo AOI ✅ (còn 2 việc cần người dùng)
 
 Port `engine.py` của bản Windows sang iPad. Toàn bộ vòng lặp chạy trong C++
 (`landclip_clip_package_json`), Swift lo UI + file + cancel.
