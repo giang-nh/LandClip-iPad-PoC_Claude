@@ -83,6 +83,12 @@ final class LandClipViewModel: ObservableObject {
             .contains(geometryType)
     }
 
+    /// Synthetic package bundled with the app for the DEBUG quick-try shortcut.
+    static var bundledSamplePackage: URL? {
+        Bundle.main.url(forResource: "sample", withExtension: "ppkx", subdirectory: "public")
+            ?? Bundle.main.url(forResource: "sample", withExtension: "ppkx")
+    }
+
     func openPackage(_ url: URL) {
         worker?.cancel()
         cancelFlag.cancel()

@@ -144,6 +144,31 @@ def main() -> None:
         json.dumps(expected_clip, indent=2) + "\n", encoding="utf-8"
     )
 
+    # Same idea as the GeoJSON AOI but as a DXF closed polyline with the CRS WKT
+    # embedded in a 999 comment (matches how survey exports carry their CRS). A
+    # generous 20 km box so it survives the CRS chain to the fixture layers.
+    dxf_wkt = (
+        'PROJCS["WGS 84 / UTM zone 48N",GEOGCS["WGS 84",DATUM["WGS_1984",'
+        'SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],'
+        'AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],'
+        'UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],'
+        'AUTHORITY["EPSG","4326"]],PROJECTION["Transverse_Mercator"],'
+        'PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",105],'
+        'PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],'
+        'PARAMETER["false_northing",0],UNIT["metre",1,AUTHORITY["EPSG","9001"]],'
+        'AXIS["Easting",EAST],AXIS["Northing",NORTH],AUTHORITY["EPSG","32648"]]'
+    )
+    box = [(490_000.0, 1_190_000.0), (510_000.0, 1_190_000.0),
+           (510_000.0, 1_210_000.0), (490_000.0, 1_210_000.0)]
+    dxf_lines = ["999", dxf_wkt, "0", "SECTION", "2", "HEADER",
+                 "9", "$ACADVER", "1", "AC1014", "0", "ENDSEC",
+                 "0", "SECTION", "2", "ENTITIES",
+                 "0", "LWPOLYLINE", "8", "AOI", "90", "4", "70", "1"]
+    for x, y in box:
+        dxf_lines += ["10", f"{x}", "20", f"{y}"]
+    dxf_lines += ["0", "ENDSEC", "0", "EOF", ""]
+    destination.with_name("sample-aoi.dxf").write_text("\n".join(dxf_lines), encoding="utf-8")
+
     package_path = destination.with_name("sample.ppkx")
     with zipfile.ZipFile(package_path, "w", compression=zipfile.ZIP_DEFLATED) as package:
         for file_path in sorted(destination.rglob("*")):

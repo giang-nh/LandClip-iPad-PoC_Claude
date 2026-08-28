@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -414,7 +415,38 @@ std::string sanitize_layer_name(const std::string &gdb_stem, const std::string &
 }
 
 /// Reads every polygon from the AOI file, unions them and returns the geometry
-/// plus its spatial reference (both owned by the caller).
+/// AutoCAD DXF carries no CRS of its own, but survey exports often embed the
+/// coordinate system WKT (`PROJCS[...]`) as text. Pull it out with a bracket
+/// scan, matching the Windows tool's behaviour.
+OGRSpatialReferenceH read_embedded_dxf_srs(const char *path) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file) return nullptr;
+    std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    const size_t start = text.find("PROJCS[");
+    if (start == std::string::npos) return nullptr;
+    int depth = 0;
+    bool quoted = false;
+    for (size_t index = start; index < text.size(); ++index) {
+        const char character = text[index];
+        if (character == '"') quoted = !quoted;
+        else if (!quoted && character == '[') depth += 1;
+        else if (!quoted && character == ']') {
+            depth -= 1;
+            if (depth == 0) {
+                const std::string wkt = text.substr(start, index - start + 1);
+                OGRSpatialReferenceH srs = OSRNewSpatialReference(nullptr);
+                if (OSRImportFromWkt(srs, wkt.c_str()) == OGRERR_NONE) return srs;
+                OSRDestroySpatialReference(srs);
+                return nullptr;
+            }
+        }
+    }
+    return nullptr;
+}
+
+/// Reads every polygon from the AOI file (GeoJSON / GeoPackage / DXF), unions
+/// them and returns the geometry plus its spatial reference (both owned by the
+/// caller). Closed polylines (as produced by DXF) are treated as polygons.
 bool load_aoi(const char *aoi_path, OGRGeometryH *out_geometry,
               OGRSpatialReferenceH *out_srs, std::string *error) {
     *out_geometry = nullptr;
@@ -425,8 +457,16 @@ bool load_aoi(const char *aoi_path, OGRGeometryH *out_geometry,
     OGRLayerH layer = GDALDatasetGetLayer(dataset.handle, 0);
     if (layer == nullptr) { *error = "The AOI file has no layers."; return false; }
 
+    OGRSpatialReferenceH owned_srs = nullptr;
     OGRSpatialReferenceH srs = OGR_L_GetSpatialRef(layer);
-    if (srs == nullptr) { *error = "The AOI file has no CRS."; return false; }
+    if (srs == nullptr) {
+        owned_srs = read_embedded_dxf_srs(aoi_path);
+        srs = owned_srs;
+    }
+    if (srs == nullptr) {
+        *error = "The AOI file has no CRS (for DXF, embed the PROJCS WKT).";
+        return false;
+    }
 
     GeometryGuard accumulated;
     OGR_L_ResetReading(layer);
@@ -436,10 +476,19 @@ bool load_aoi(const char *aoi_path, OGRGeometryH *out_geometry,
         OGRGeometryH geometry = OGR_F_GetGeometryRef(feature);
         if (geometry != nullptr) {
             const OGRwkbGeometryType flat = wkbFlatten(OGR_G_GetGeometryType(geometry));
+            OGRGeometryH candidate = nullptr;
             if (flat == wkbPolygon || flat == wkbMultiPolygon) {
-                OGRGeometryH part = OGR_G_IsValid(geometry) ? OGR_G_Clone(geometry)
-                                                           : OGR_G_MakeValid(geometry);
-                if (part != nullptr) {
+                candidate = OGR_G_Clone(geometry);
+            } else if (flat == wkbLineString || flat == wkbMultiLineString ||
+                       flat == wkbLinearRing) {
+                // A closed polyline drawn as an AOI: force it to a polygon.
+                candidate = OGR_G_ForceToPolygon(OGR_G_Clone(geometry));
+            }
+            if (candidate != nullptr) {
+                OGRGeometryH part = OGR_G_IsValid(candidate) ? candidate
+                                                            : OGR_G_MakeValid(candidate);
+                if (part != candidate) OGR_G_DestroyGeometry(candidate);
+                if (part != nullptr && !OGR_G_IsEmpty(part)) {
                     polygon_count += 1;
                     if (accumulated.handle == nullptr) {
                         accumulated.handle = part;
@@ -451,17 +500,20 @@ bool load_aoi(const char *aoi_path, OGRGeometryH *out_geometry,
                             accumulated.handle = merged;
                         }
                     }
+                } else if (part != nullptr) {
+                    OGR_G_DestroyGeometry(part);
                 }
             }
         }
         OGR_F_Destroy(feature);
     }
     if (polygon_count == 0 || accumulated.handle == nullptr) {
-        *error = "The AOI file has no polygon features.";
+        if (owned_srs != nullptr) OSRDestroySpatialReference(owned_srs);
+        *error = "The AOI file has no polygon (or closed polyline) features.";
         return false;
     }
 
-    *out_srs = OSRClone(srs);
+    *out_srs = (owned_srs != nullptr) ? owned_srs : OSRClone(srs);
     *out_geometry = accumulated.release();
     return true;
 }

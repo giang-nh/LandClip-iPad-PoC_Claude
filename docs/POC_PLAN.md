@@ -76,9 +76,11 @@ Port `engine.py` của bản Windows sang iPad. Toàn bộ vòng lặp chạy tr
 - [x] UI: MapKit (ảnh vệ tinh Esri) vẽ AOI polygon bằng chạm điểm → clip có progress →
   danh sách summary + filter → `ShareLink` GeoPackage + CSV.
 - [x] Preview layer kết quả trên bản đồ + bảng thuộc tính (`LayerPreviewView`).
-- [x] AOI từ file import (GeoJSON / GeoPackage).
-- [ ] Verify giao diện/tương tác thật trên iPad/Mac (không làm được từ CI).
-- [ ] AOI từ DXF (bản Windows có `dxf.py`; iPad chưa port).
+- [x] AOI từ file import: GeoJSON / GeoPackage / **DXF** (driver GDAL DXF, closed
+  polyline → polygon, đọc WKT nhúng trong comment `999` như bản Windows).
+- [x] Đường phát hành lên iPad khi không có Mac: workflow `TestFlight` +
+  [`TESTFLIGHT_VI.md`](TESTFLIGHT_VI.md).
+- [ ] Verify giao diện/tương tác thật trên iPad (làm theo `TESTFLIGHT_VI.md`).
 - [ ] Xử lý GEOS/LGPL cho bản phân phối (framework động / relink-kit) + màn Acknowledgements.
 
 ## Tiêu chí pass

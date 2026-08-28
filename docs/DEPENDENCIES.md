@@ -48,7 +48,8 @@ Script build **tối giản** để giảm bề mặt license và kích thước
 - `GDAL_BUILD_OPTIONAL_DRIVERS=OFF`, `OGR_BUILD_OPTIONAL_DRIVERS=OFF` — tắt toàn bộ
   driver mặc định.
 - Chỉ bật: `OGR_ENABLE_DRIVER_OPENFILEGDB=ON`, `OGR_ENABLE_DRIVER_GPKG=ON`,
-  `OGR_ENABLE_DRIVER_GEOJSON=ON`.
+  `OGR_ENABLE_DRIVER_GEOJSON=ON`, `OGR_ENABLE_DRIVER_DXF=ON` (đọc AOI từ DXF; driver
+  MIT, thuộc GDAL).
   - Runtime còn giới hạn thêm bằng `allowed_drivers = {"OpenFileGDB"}` trong
     [`GISCore.cpp`](../GISCore/Sources/GISCore.cpp) khi mở dataset.
 - `GDAL_USE_EXTERNAL_LIBS=OFF` — GDAL dùng bản nhúng nội bộ (json-c…) thay vì lib hệ

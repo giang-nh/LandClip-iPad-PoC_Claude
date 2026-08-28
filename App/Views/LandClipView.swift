@@ -18,10 +18,25 @@ struct LandClipView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        importingPackage = true
+                    Menu {
+                        Button {
+                            importingPackage = true
+                        } label: {
+                            Label("Chọn file PPKX", systemImage: "folder")
+                        }
+                        #if DEBUG
+                        if LandClipViewModel.bundledSamplePackage != nil {
+                            Button {
+                                if let url = LandClipViewModel.bundledSamplePackage {
+                                    model.openPackage(url)
+                                }
+                            } label: {
+                                Label("Thử nhanh (dữ liệu mẫu)", systemImage: "sparkles")
+                            }
+                        }
+                        #endif
                     } label: {
-                        Label("Chọn PPKX", systemImage: "folder")
+                        Label("Mở", systemImage: "folder")
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -41,8 +56,10 @@ struct LandClipView: View {
             }
             .fileImporter(
                 isPresented: $importingAOI,
-                allowedContentTypes: [.json, UTType(filenameExtension: "geojson") ?? .json,
-                                      UTType(filenameExtension: "gpkg") ?? .data],
+                allowedContentTypes: [.json,
+                                      UTType(filenameExtension: "geojson") ?? .json,
+                                      UTType(filenameExtension: "gpkg") ?? .data,
+                                      UTType(filenameExtension: "dxf") ?? .data],
                 allowsMultipleSelection: false
             ) { result in
                 if case let .success(urls) = result, let url = urls.first {

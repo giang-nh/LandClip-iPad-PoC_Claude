@@ -165,6 +165,33 @@ final class PackageCatalogModelTests: XCTestCase {
         XCTAssertTrue(events.snapshot.contains("layer_done"))
     }
 
+    func testDXFAOIClips() throws {
+        let engine = NativeClipEngine()
+        guard engine.isAvailable else {
+            throw XCTSkip("Native GDAL is only enabled by project-native.yml")
+        }
+        let bundle = Bundle(for: Self.self)
+        guard
+            let gdbURL = bundle.url(forResource: "sample", withExtension: "gdb", subdirectory: "public")
+                ?? bundle.url(forResource: "sample", withExtension: "gdb"),
+            let dxfURL = bundle.url(forResource: "sample-aoi", withExtension: "dxf", subdirectory: "public")
+                ?? bundle.url(forResource: "sample-aoi", withExtension: "dxf")
+        else {
+            return XCTFail("DXF fixtures are missing from the test bundle")
+        }
+
+        let outputDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("clip-dxf-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: outputDirectory) }
+
+        // The DXF driver + closed-polyline -> polygon + embedded PROJCS WKT path
+        // must all work; every source layer should be processed.
+        let result = try engine.clip(gdbURLs: [gdbURL], aoiURL: dxfURL, outputDirectory: outputDirectory)
+        XCTAssertEqual(result.layers.count, 3)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: result.outputGeoPackage))
+    }
+
     func testNativeLayerGeoJSONPreview() throws {
         let reader = NativeLayerReader()
         guard reader.isAvailable else {
