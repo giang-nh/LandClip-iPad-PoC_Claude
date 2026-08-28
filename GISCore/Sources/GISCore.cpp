@@ -435,7 +435,7 @@ OGRSpatialReferenceH read_embedded_dxf_srs(const char *path) {
             if (depth == 0) {
                 const std::string wkt = text.substr(start, index - start + 1);
                 OGRSpatialReferenceH srs = OSRNewSpatialReference(nullptr);
-                if (OSRImportFromWkt(srs, wkt.c_str()) == OGRERR_NONE) return srs;
+                if (OSRSetFromUserInput(srs, wkt.c_str()) == OGRERR_NONE) return srs;
                 OSRDestroySpatialReference(srs);
                 return nullptr;
             }

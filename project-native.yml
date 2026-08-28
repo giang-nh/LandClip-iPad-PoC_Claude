@@ -63,6 +63,7 @@ targets:
     scheme:
       testTargets:
         - LandClipIPadTests
+        - LandClipIPadUITests
   LandClipIPadTests:
     type: bundle.unit-test
     platform: iOS
@@ -76,3 +77,14 @@ targets:
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
+  LandClipIPadUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: LandClipIPad
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: LandClipIPad

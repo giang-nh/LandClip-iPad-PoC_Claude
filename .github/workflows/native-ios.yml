@@ -69,6 +69,7 @@ jobs:
             -scheme LandClipIPad \
             -sdk iphonesimulator \
             -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            -skip-testing:LandClipIPadUITests \
             CODE_SIGNING_ALLOWED=NO \
             test 2>&1 | tee xcodebuild.log
           STATUS=${PIPESTATUS[0]}

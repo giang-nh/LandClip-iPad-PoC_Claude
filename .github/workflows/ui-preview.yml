@@ -1,0 +1,94 @@
+name: UI preview
+
+# Runs the app in an iPad simulator, walks the whole flow and uploads
+# screenshots + a screen recording as artifacts. No Apple account needed.
+# Trigger from the Actions tab (Run workflow).
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ui-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install tools
+        run: |
+          brew install cmake ninja xcodegen
+          brew install chargepoint/xcparse/xcparse
+
+      - name: Restore native build cache
+        id: native-cache
+        uses: actions/cache@v5
+        with:
+          path: Vendor
+          key: landclip-native-v2-gdal-3.11.4-proj-9.6.2-geos-3.14.1-sqlite-3500400-archive-3.8.9-${{ hashFiles('scripts/build-native-xcframeworks.sh') }}
+
+      - name: Build native XCFrameworks
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build-native-xcframeworks.sh
+
+      - name: Generate Xcode project
+        run: xcodegen generate --spec project-native.yml
+
+      - name: Boot iPad simulator
+        run: |
+          DEVICE_ID=$(xcrun simctl list devices available -j | \
+            python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for r in d.values() for x in r if "iPad" in x["name"]))')
+          echo "DEVICE_ID=$DEVICE_ID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$DEVICE_ID"
+          xcrun simctl bootstatus "$DEVICE_ID" -b
+
+      - name: Start screen recording
+        run: |
+          xcrun simctl io "$DEVICE_ID" recordVideo --codec h264 --force "$RUNNER_TEMP/walkthrough.mp4" &
+          echo $! > "$RUNNER_TEMP/rec.pid"
+
+      - name: Run walkthrough UI test
+        run: |
+          set +e
+          xcodebuild \
+            -project LandClipIPad.xcodeproj \
+            -scheme LandClipIPad \
+            -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            -only-testing:LandClipIPadUITests \
+            -resultBundlePath "$RUNNER_TEMP/UIPreview.xcresult" \
+            CODE_SIGNING_ALLOWED=NO \
+            test 2>&1 | tee xcodebuild.log
+          echo "STATUS=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
+
+      - name: Stop screen recording
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/rec.pid" ]; then
+            kill -INT "$(cat "$RUNNER_TEMP/rec.pid")" || true
+            sleep 3
+          fi
+
+      - name: Extract screenshots
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/shots"
+          xcparse screenshots --os --test "$RUNNER_TEMP/UIPreview.xcresult" "$RUNNER_TEMP/shots" || true
+          ls -R "$RUNNER_TEMP/shots" || true
+
+      - name: Upload preview
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: landclip-ui-preview
+          path: |
+            ${{ runner.temp }}/shots
+            ${{ runner.temp }}/walkthrough.mp4
+          retention-days: 14
+
+      - name: Fail if the walkthrough failed
+        if: always()
+        run: exit ${STATUS:-1}
