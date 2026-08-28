@@ -78,10 +78,15 @@ Port `engine.py` của bản Windows sang iPad. Toàn bộ vòng lặp chạy tr
 - [x] Preview layer kết quả trên bản đồ + bảng thuộc tính (`LayerPreviewView`).
 - [x] AOI từ file import: GeoJSON / GeoPackage / **DXF** (driver GDAL DXF, closed
   polyline → polygon, đọc WKT nhúng trong comment `999` như bản Windows).
+- [x] Màn "Ghi nhận & Pháp lý" (`AcknowledgementsView`).
 - [x] Đường phát hành lên iPad khi không có Mac: workflow `TestFlight` +
   [`TESTFLIGHT_VI.md`](TESTFLIGHT_VI.md).
-- [ ] Verify giao diện/tương tác thật trên iPad (làm theo `TESTFLIGHT_VI.md`).
-- [ ] Xử lý GEOS/LGPL cho bản phân phối (framework động / relink-kit) + màn Acknowledgements.
+- [x] Verify luồng UI trong simulator: workflow `UI preview` tự chạy hết luồng
+  (mở → catalog → AOI → clip → kết quả đúng points 2 / lines 1 / polygons 1 →
+  preview layer) và xuất screenshots + video.
+- [ ] Verify trên iPad thật (làm theo `TESTFLIGHT_VI.md` — cần Apple Developer account).
+- [ ] Chuyển GEOS sang framework động trước bản phân phối
+  ([`GEOS_DYNAMIC_PLAN.md`](GEOS_DYNAMIC_PLAN.md)).
 
 ## Tiêu chí pass
 
