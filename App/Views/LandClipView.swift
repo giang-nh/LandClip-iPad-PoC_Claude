@@ -8,6 +8,7 @@ struct LandClipView: View {
     @State private var importingAOI = false
     @State private var showResults = false
     @State private var showAcknowledgements = false
+    @State private var showLayerSelection = false
     @State private var camera: MapCameraPosition = .region(
         MKCoordinateRegion(
             center: CLLocationCoordinate2D(latitude: 16.0, longitude: 106.0),
@@ -85,6 +86,9 @@ struct LandClipView: View {
             }
             .sheet(isPresented: $showAcknowledgements) {
                 AcknowledgementsView()
+            }
+            .sheet(isPresented: $showLayerSelection) {
+                LayerSelectionView(model: model)
             }
             .onChange(of: model.stage) { _, stage in
                 if stage == .done { showResults = true }
@@ -170,11 +174,17 @@ struct LandClipView: View {
             if let catalog = model.catalog {
                 VStack(alignment: .leading) {
                     Text(catalog.packageName).font(.headline)
-                    Text("\(catalog.layers.count) layer · \(model.supportedLayerCount) hỗ trợ clip")
+                    Text("\(catalog.layers.count) layer · chọn \(model.selectedLayerCount)/\(model.supportedLayerCount)")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
             Spacer()
+            Button {
+                showLayerSelection = true
+            } label: {
+                Label("Chọn layer", systemImage: "line.3.horizontal.decrease.circle")
+            }
+            .buttonStyle(.bordered)
         }
     }
 
@@ -214,7 +224,7 @@ struct LandClipView: View {
             model.runClip()
         } label: {
             Text(model.hasAOI
-                 ? "Trích xuất \(model.supportedLayerCount) layer"
+                 ? "Trích xuất \(model.selectedLayerCount) layer"
                  : "Chạm lên bản đồ để vẽ AOI (≥ 3 điểm) hoặc nhập file")
             .frame(maxWidth: .infinity)
         }

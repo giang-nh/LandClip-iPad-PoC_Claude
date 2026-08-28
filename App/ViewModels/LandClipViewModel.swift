@@ -35,15 +35,39 @@ final class LandClipViewModel: ObservableObject {
     @Published var aoiVertices: [CLLocationCoordinate2D] = []
     /// An imported AOI file (GeoJSON / GeoPackage); takes priority over `aoiVertices`.
     @Published private(set) var importedAOIName: String?
+    /// Supported layer keys the user has excluded (empty = process all).
+    @Published var deselectedLayerKeys: Set<String> = []
 
     private var importedAOIURL: URL?
+
+    /// `gdb::layer` keys of supported layers.
+    var supportedLayerKeys: [String] {
+        (catalog?.layers ?? [])
+            .filter { LandClipViewModel.isSupported($0.geometryType) }
+            .map { "\($0.geodatabase.replacingOccurrences(of: ".gdb", with: ""))::\($0.name)" }
+    }
+    /// Keys to actually process; empty means "all supported" (engine default).
+    var selectedLayerKeys: [String] {
+        let selected = supportedLayerKeys.filter { !deselectedLayerKeys.contains($0) }
+        return selected.count == supportedLayerKeys.count ? [] : selected
+    }
+    var selectedLayerCount: Int {
+        supportedLayerKeys.count - deselectedLayerKeys.filter { supportedLayerKeys.contains($0) }.count
+    }
+
+    func toggleLayer(_ key: String) {
+        if deselectedLayerKeys.contains(key) { deselectedLayerKeys.remove(key) }
+        else { deselectedLayerKeys.insert(key) }
+    }
+    func selectAllLayers() { deselectedLayerKeys.removeAll() }
+    func deselectAllLayers() { deselectedLayerKeys = Set(supportedLayerKeys) }
 
     var engineAvailable: Bool { NativeGeodatabaseReader().isAvailable }
     var canDraw: Bool { (stage == .ready || stage == .done) && importedAOIURL == nil }
     var hasAOI: Bool { importedAOIURL != nil || aoiVertices.count >= 3 }
     var canClip: Bool {
         switch stage {
-        case .ready, .done: return hasAOI
+        case .ready, .done: return hasAOI && selectedLayerCount > 0
         default: return false
         }
     }
@@ -113,6 +137,7 @@ final class LandClipViewModel: ObservableObject {
         catalog = nil
         result = nil
         aoiVertices = []
+        deselectedLayerKeys = []
         progress = Report()
         stage = .preparing(url.lastPathComponent)
 
@@ -179,11 +204,13 @@ final class LandClipViewModel: ObservableObject {
                     try LandClipViewModel.writeAOI(vertices, to: aoiURL)
                 }
 
+                let selected = self.selectedLayerKeys
                 let clipResult = try await Task.detached(priority: .userInitiated) {
                     try NativeClipEngine().clip(
                         gdbURLs: geodatabaseURLs,
                         aoiURL: aoiURL,
                         outputDirectory: outputDirectory,
+                        selectedLayers: selected,
                         onEvent: handler
                     )
                 }.value
@@ -214,6 +241,7 @@ final class LandClipViewModel: ObservableObject {
         catalog = nil
         result = nil
         aoiVertices = []
+        deselectedLayerKeys = []
         progress = Report()
         stage = .idle
     }
