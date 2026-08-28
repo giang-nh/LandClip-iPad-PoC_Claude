@@ -75,9 +75,10 @@ Port `engine.py` của bản Windows sang iPad. Toàn bộ vòng lặp chạy tr
 - [x] Integration test trên CI (`testNativeClipPipeline`): Select 2 điểm, clip 1 line + 1 polygon.
 - [x] UI: MapKit (ảnh vệ tinh Esri) vẽ AOI polygon bằng chạm điểm → clip có progress →
   danh sách summary + filter → `ShareLink` GeoPackage + CSV.
+- [x] Preview layer kết quả trên bản đồ + bảng thuộc tính (`LayerPreviewView`).
+- [x] AOI từ file import (GeoJSON / GeoPackage).
 - [ ] Verify giao diện/tương tác thật trên iPad/Mac (không làm được từ CI).
-- [ ] AOI từ file import + DXF (hiện chỉ vẽ tay trên map).
-- [ ] Preview layer kết quả trên bản đồ + bảng thuộc tính.
+- [ ] AOI từ DXF (bản Windows có `dxf.py`; iPad chưa port).
 - [ ] Xử lý GEOS/LGPL cho bản phân phối (framework động / relink-kit) + màn Acknowledgements.
 
 ## Tiêu chí pass

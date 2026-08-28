@@ -290,8 +290,8 @@ int landclip_archive_extract_ppkx(const char *package_path,
         size_t size = 0;
         la_int64_t offset = 0;
         while ((result = archive_read_data_block(input, &buffer, &size, &offset)) == ARCHIVE_OK) {
-            result = archive_write_data_block(output, buffer, size, offset);
-            if (result < ARCHIVE_OK) break;
+            const la_ssize_t written = archive_write_data_block(output, buffer, size, offset);
+            if (written < ARCHIVE_OK) { result = static_cast<int>(written); break; }
             bytes_done += static_cast<std::int64_t>(size);
         }
         if (result != ARCHIVE_EOF && result < ARCHIVE_OK) break;

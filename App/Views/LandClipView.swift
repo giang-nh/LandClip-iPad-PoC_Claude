@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct LandClipView: View {
     @StateObject private var model = LandClipViewModel()
     @State private var importingPackage = false
+    @State private var importingAOI = false
     @State private var showResults = false
 
     var body: some View {
@@ -36,6 +37,16 @@ struct LandClipView: View {
             ) { result in
                 if case let .success(urls) = result, let url = urls.first {
                     model.openPackage(url)
+                }
+            }
+            .fileImporter(
+                isPresented: $importingAOI,
+                allowedContentTypes: [.json, UTType(filenameExtension: "geojson") ?? .json,
+                                      UTType(filenameExtension: "gpkg") ?? .data],
+                allowsMultipleSelection: false
+            ) { result in
+                if case let .success(urls) = result, let url = urls.first {
+                    model.importAOI(url)
                 }
             }
             .sheet(isPresented: $showResults) {
@@ -135,30 +146,44 @@ struct LandClipView: View {
         }
     }
 
+    @ViewBuilder
     private var aoiControls: some View {
-        HStack {
-            Text("AOI: \(model.aoiVertices.count) điểm")
-                .font(.subheadline)
-            Spacer()
-            Button {
-                if !model.aoiVertices.isEmpty { model.aoiVertices.removeLast() }
-            } label: { Image(systemName: "arrow.uturn.backward") }
-                .disabled(model.aoiVertices.isEmpty)
-            Button {
-                model.aoiVertices.removeAll()
-            } label: { Image(systemName: "trash") }
-                .disabled(model.aoiVertices.isEmpty)
+        if let name = model.importedAOIName {
+            HStack {
+                Label(name, systemImage: "doc")
+                    .font(.subheadline).lineLimit(1)
+                Spacer()
+                Button("Bỏ", role: .destructive) { model.clearImportedAOI() }
+                    .buttonStyle(.bordered)
+            }
+        } else {
+            HStack {
+                Text("AOI: \(model.aoiVertices.count) điểm")
+                    .font(.subheadline)
+                Spacer()
+                Button {
+                    importingAOI = true
+                } label: { Image(systemName: "doc.badge.plus") }
+                Button {
+                    if !model.aoiVertices.isEmpty { model.aoiVertices.removeLast() }
+                } label: { Image(systemName: "arrow.uturn.backward") }
+                    .disabled(model.aoiVertices.isEmpty)
+                Button {
+                    model.aoiVertices.removeAll()
+                } label: { Image(systemName: "trash") }
+                    .disabled(model.aoiVertices.isEmpty)
+            }
+            .buttonStyle(.bordered)
         }
-        .buttonStyle(.bordered)
     }
 
     private var clipButton: some View {
         Button {
             model.runClip()
         } label: {
-            Text(model.aoiVertices.count >= 3
+            Text(model.hasAOI
                  ? "Trích xuất \(model.supportedLayerCount) layer"
-                 : "Chạm lên bản đồ để vẽ AOI (≥ 3 điểm)")
+                 : "Chạm lên bản đồ để vẽ AOI (≥ 3 điểm) hoặc nhập file")
             .frame(maxWidth: .infinity)
         }
         .buttonStyle(.borderedProminent)
