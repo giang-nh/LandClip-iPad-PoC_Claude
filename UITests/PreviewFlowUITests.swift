@@ -30,19 +30,17 @@ final class PreviewFlowUITests: XCTestCase {
         XCTAssertTrue(quickTry.waitForExistence(timeout: 5), "quick-try shortcut missing")
         quickTry.tap()
 
-        // Catalog ready + the bundled demo AOI loaded automatically.
-        let ready = app.staticTexts.containing(
-            NSPredicate(format: "label CONTAINS[c] 'hỗ trợ clip'")
-        ).firstMatch
-        XCTAssertTrue(ready.waitForExistence(timeout: 30), "catalog never became ready")
+        // Catalog ready (the layer-selection button only shows once catalogued).
+        let ready = app.buttons["Chọn layer"]
+        XCTAssertTrue(ready.waitForExistence(timeout: 45), "catalog never became ready")
         snap("02-catalog")
 
-        // Also drop a couple of manual AOI points to show the drawing UI.
-        let window = app.windows.firstMatch
-        for offset in [CGVector(dx: 0.40, dy: 0.30), CGVector(dx: 0.60, dy: 0.55)] {
-            window.coordinate(withNormalizedOffset: offset).tap()
+        // Layer selection sheet.
+        ready.tap()
+        if app.navigationBars.element(boundBy: 0).waitForExistence(timeout: 3) {
+            snap("03-layer-selection")
+            app.buttons["Xong"].firstMatch.tap()
         }
-        snap("03-aoi")
 
         // Run the clip (demo AOI is already loaded, so this is enabled).
         let clip = app.buttons.containing(
