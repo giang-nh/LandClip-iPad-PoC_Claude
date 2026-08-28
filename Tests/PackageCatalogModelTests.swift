@@ -1,4 +1,5 @@
 import XCTest
+import CoreLocation
 @testable import LandClipIPad
 
 private struct SuccessfulScanner: PackageScanning {
@@ -93,6 +94,28 @@ final class PackageCatalogModelTests: XCTestCase {
         }
         let writtenLayerCount: Int
         let layers: [Layer]
+    }
+
+    func testWriteAOIClosesRingAndUsesLonLat() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("aoi-\(UUID().uuidString).geojson")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        try LandClipViewModel.writeAOI([
+            CLLocationCoordinate2D(latitude: 10, longitude: 106),
+            CLLocationCoordinate2D(latitude: 10, longitude: 107),
+            CLLocationCoordinate2D(latitude: 11, longitude: 107),
+        ], to: url)
+
+        let object = try JSONSerialization.jsonObject(with: Data(contentsOf: url))
+        let json = try XCTUnwrap(object as? [String: Any])
+        let features = try XCTUnwrap(json["features"] as? [[String: Any]])
+        let geometry = try XCTUnwrap(features.first?["geometry"] as? [String: Any])
+        let ring = try XCTUnwrap((geometry["coordinates"] as? [[[Double]]])?.first)
+
+        XCTAssertEqual(ring.count, 4, "ring should be closed")
+        XCTAssertEqual(ring.first, ring.last)
+        XCTAssertEqual(ring.first, [106, 10], "GeoJSON is [lon, lat]")
     }
 
     func testNativeClipPipeline() throws {

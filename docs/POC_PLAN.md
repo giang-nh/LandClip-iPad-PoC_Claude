@@ -50,15 +50,41 @@ thật (GEOS động hoặc relink-kit, màn Acknowledgements) để lại cho G
 
 ## Giai đoạn 2 — catalog thật
 
-- Sao chép PPKX vào sandbox theo luồng streaming.
-- Giải nén vào `Library/Caches`.
-- Tìm mọi `.gdb` và liệt kê layer, geometry, CRS, feature count.
-- Hủy scan an toàn và dọn file tạm.
+- [x] Sao chép PPKX vào sandbox theo luồng streaming (`NativePackageScanner.copyStreaming`).
+- [x] Giải nén vào `Library/Caches` (libarchive, hỗ trợ ZIP + 7z).
+- [x] Tìm mọi `.gdb` và liệt kê layer, geometry, CRS, feature count.
+- [x] Hủy scan an toàn và dọn file tạm (`CancelFlag` + dọn `jobDirectory`).
+- [x] Progress theo phase (`copy` / `extract` / `catalog`) + số mục giải nén.
+
+`prepare()` giữ lại thư mục đã giải nén cho Giai đoạn 3 dùng lại (không giải nén 2 lần);
+caller chịu trách nhiệm dọn.
+
+## Giai đoạn 3 — clip theo AOI
+
+Port `engine.py` của bản Windows sang iPad. Toàn bộ vòng lặp chạy trong C++
+(`landclip_clip_package_json`), Swift lo UI + file + cancel.
+
+- [x] Nạp AOI (GeoJSON/GeoPackage, 1+ polygon, union, `MakeValid`).
+- [x] Với mỗi layer hỗ trợ: transform AOI → CRS layer, lọc bbox (`SetSpatialFilter`),
+  intersect chính xác (`OGR_G_Intersects` + `OGR_G_Intersection`).
+- [x] **Point/MultiPoint = Select** (giữ nguyên), **Line/Polygon = Clip** (cắt theo AOI).
+- [x] Giữ nguyên thuộc tính (`OGR_F_SetFrom`), ghi 1 layer GeoPackage / 1 layer nguồn.
+- [x] Fault isolation: lỗi 1 layer ghi vào summary, không sập job.
+- [x] Cancel theo ranh giới layer, xoá output dở.
+- [x] Summary CSV (gdb, source_layer, output_layer, geometry_type, counts, status, message).
+- [x] Integration test trên CI (`testNativeClipPipeline`): Select 2 điểm, clip 1 line + 1 polygon.
+- [x] UI: MapKit (ảnh vệ tinh Esri) vẽ AOI polygon bằng chạm điểm → clip có progress →
+  danh sách summary + filter → `ShareLink` GeoPackage + CSV.
+- [ ] Verify giao diện/tương tác thật trên iPad/Mac (không làm được từ CI).
+- [ ] AOI từ file import + DXF (hiện chỉ vẽ tay trên map).
+- [ ] Preview layer kết quả trên bản đồ + bảng thuộc tính.
+- [ ] Xử lý GEOS/LGPL cho bản phân phối (framework động / relink-kit) + màn Acknowledgements.
 
 ## Tiêu chí pass
 
 1. Đọc đúng số geodatabase và layer so với tool Windows/ArcGIS.
-2. Không đưa dữ liệu ra khỏi iPad.
-3. Peak memory không tăng theo toàn bộ kích thước layer.
-4. Scan có progress và cancel.
-5. File tạm được dọn sau khi hoàn thành hoặc hủy.
+2. Không đưa dữ liệu ra khỏi iPad. — ✅ toàn bộ chạy on-device, không network trừ tile nền.
+3. Peak memory không tăng theo toàn bộ kích thước layer. — ✅ đọc feature theo iterator,
+   không nạp cả layer; catalog chỉ đọc metadata.
+4. Scan có progress và cancel. — ✅
+5. File tạm được dọn sau khi hoàn thành hoặc hủy. — ✅

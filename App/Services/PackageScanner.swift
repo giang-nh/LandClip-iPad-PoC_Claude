@@ -33,8 +33,29 @@ struct DefaultPackageScanner: PackageScanning {
     }
 }
 
+/// A package that has been copied into the sandbox, unpacked and catalogued. The
+/// extracted geodatabases stay on disk so the clip engine can reuse them; the
+/// caller must delete `jobDirectory` when finished.
+struct PreparedPackage: Sendable {
+    let catalog: PackageCatalog
+    let geodatabaseURLs: [URL]
+    let jobDirectory: URL
+}
+
 struct NativePackageScanner: PackageScanning {
     func scan(packageURL: URL) async throws -> PackageCatalog {
+        let prepared = try await prepare(packageURL: packageURL)
+        try? FileManager.default.removeItem(at: prepared.jobDirectory)
+        return prepared.catalog
+    }
+
+    /// Streaming copy → unpack → discover `.gdb` → read catalog, keeping the
+    /// extracted tree on disk. `onEvent` receives `{"event":"phase",...}` and
+    /// `{"event":"extract",...}` events and can request cancellation.
+    func prepare(
+        packageURL: URL,
+        onEvent: @escaping GISProgressBridge.Handler = { _ in false }
+    ) async throws -> PreparedPackage {
         guard packageURL.pathExtension.lowercased() == "ppkx" else {
             throw PackageScanError.invalidExtension
         }
@@ -47,27 +68,40 @@ struct NativePackageScanner: PackageScanning {
             let archiveURL = jobDirectory.appendingPathComponent("package.ppkx")
             let extractedURL = jobDirectory.appendingPathComponent("extracted", isDirectory: true)
             try fileManager.createDirectory(at: extractedURL, withIntermediateDirectories: true)
-            defer { try? fileManager.removeItem(at: jobDirectory) }
 
-            try Task.checkCancellation()
-            try Self.copyStreaming(from: packageURL, to: archiveURL)
-            try Task.checkCancellation()
-            try Self.extract(packageURL: archiveURL, destinationURL: extractedURL)
-            try Task.checkCancellation()
-
-            let geodatabases = Self.findGeodatabases(in: extractedURL)
-            guard !geodatabases.isEmpty else { throw PackageScanError.geodatabaseNotFound }
-            let reader = NativeGeodatabaseReader()
-            var layers: [LayerInfo] = []
-            for geodatabase in geodatabases {
+            do {
+                _ = onEvent(#"{"event":"phase","phase":"copy"}"#)
                 try Task.checkCancellation()
-                layers.append(contentsOf: try reader.read(gdbURL: geodatabase))
+                try Self.copyStreaming(from: packageURL, to: archiveURL)
+
+                _ = onEvent(#"{"event":"phase","phase":"extract"}"#)
+                try Task.checkCancellation()
+                try Self.extract(packageURL: archiveURL, destinationURL: extractedURL, onEvent: onEvent)
+                try? fileManager.removeItem(at: archiveURL)
+
+                _ = onEvent(#"{"event":"phase","phase":"catalog"}"#)
+                try Task.checkCancellation()
+                let geodatabases = Self.findGeodatabases(in: extractedURL)
+                guard !geodatabases.isEmpty else { throw PackageScanError.geodatabaseNotFound }
+                let reader = NativeGeodatabaseReader()
+                var layers: [LayerInfo] = []
+                for geodatabase in geodatabases {
+                    try Task.checkCancellation()
+                    layers.append(contentsOf: try reader.read(gdbURL: geodatabase))
+                }
+                return PreparedPackage(
+                    catalog: PackageCatalog(
+                        packageName: packageURL.lastPathComponent,
+                        packageSize: Int64(values.fileSize ?? 0),
+                        layers: layers
+                    ),
+                    geodatabaseURLs: geodatabases,
+                    jobDirectory: jobDirectory
+                )
+            } catch {
+                try? fileManager.removeItem(at: jobDirectory)
+                throw error
             }
-            return PackageCatalog(
-                packageName: packageURL.lastPathComponent,
-                packageSize: Int64(values.fileSize ?? 0),
-                layers: layers
-            )
         }.value
     }
 
