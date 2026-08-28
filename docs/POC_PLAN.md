@@ -79,6 +79,31 @@ Port `engine.py` của bản Windows sang iPad. Toàn bộ vòng lặp chạy tr
 - [x] AOI từ file import: GeoJSON / GeoPackage / **DXF** (driver GDAL DXF, closed
   polyline → polygon, đọc WKT nhúng trong comment `999` như bản Windows).
 - [x] Màn "Ghi nhận & Pháp lý" (`AcknowledgementsView`).
+
+### Ngang tính năng với bản Windows (bổ sung sau)
+
+- [x] Chọn / bỏ chọn từng layer trước khi clip (`LayerSelectionView`, options
+  `{"layers":[...]}` cho engine).
+- [x] Diện tích + chu vi AOI (reproject sang UTM zone của centroid như
+  `estimate_utm_crs`).
+- [x] Vẽ AOI: chạm thêm đỉnh / **chạm lên đỉnh để xoá** / **chế độ hình chữ nhật** /
+  toggle vệ tinh ↔ đường phố.
+- [x] Bảng đếm realtime từng layer trong lúc clip (nguồn → ứng viên → kết quả).
+- [x] **Đánh giá Đúng/Sai** theo layer và theo đối tượng (`RatingStore`, lưu on-device)
+  + tooltip trợ giúp.
+- [x] **Tự tiếp tục sau khi dừng**: khoá = package + AOI + layer + processor version;
+  giữ GeoPackage khi dừng, lần chạy sau append + `skipLayers`; nút "Chạy lại từ đầu".
+- [x] **Khai báo tên người dùng** lần đầu (local, không auth), bắt buộc trước khi clip.
+- [x] **Nhật ký hoạt động on-device** (`audit.jsonl`) + PPKX SHA-256 + `AuditLogView`.
+
+### Cố ý KHÔNG port (giữ nguyên tắc on-device)
+
+- Audit đẩy lên Supabase / hàng đợi offline — `AuditSink` để ngỏ cho bản opt-in.
+- Upload PPKX khi báo lỗi — gửi data ra ngoài.
+- Auto-update Velopack — TestFlight/App Store lo.
+- Test đối chứng ArcGIS Pro — cần ArcGIS + máy Windows, xem
+  [`ARCGIS_VALIDATION_VI.md`](ARCGIS_VALIDATION_VI.md).
+
 - [x] Đường phát hành lên iPad khi không có Mac: workflow `TestFlight` +
   [`TESTFLIGHT_VI.md`](TESTFLIGHT_VI.md).
 - [x] Verify luồng UI trong simulator: workflow `UI preview` tự chạy hết luồng
