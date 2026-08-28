@@ -303,30 +303,46 @@ struct LandClipView: View {
                     .lineLimit(1)
             }
             if !model.liveRows.isEmpty {
-                ScrollView {
-                    VStack(spacing: 4) {
-                        ForEach(model.liveRows.reversed()) { row in
-                            HStack {
-                                Image(systemName: row.status == "running" ? "circle.dotted" : "checkmark.circle")
-                                    .foregroundStyle(row.status == "running" ? .secondary : .green)
-                                    .font(.caption2)
-                                Text(row.layer).font(.caption).lineLimit(1)
-                                Spacer()
-                                Text(row.status == "running"
-                                     ? "nguồn \(row.sourceCount)"
-                                     : "\(row.candidateCount) → \(row.outputCount)")
-                                    .font(.caption2).foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
-                .frame(maxHeight: 130)
+                liveRowsList
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private var liveRowsList: some View {
+        ScrollView {
+            VStack(spacing: 4) {
+                ForEach(model.liveRows.reversed()) { row in
+                    LiveRowView(row: row)
+                }
+            }
+        }
+        .frame(maxHeight: 130)
+    }
+
     private func hint(_ text: String) -> some View {
         Text(text).foregroundStyle(.secondary).frame(maxWidth: .infinity)
+    }
+}
+
+private struct LiveRowView: View {
+    let row: LandClipViewModel.LiveRow
+
+    private var running: Bool { row.status == "running" }
+
+    var body: some View {
+        HStack {
+            Image(systemName: running ? "circle.dotted" : "checkmark.circle")
+                .foregroundStyle(running ? Color.secondary : Color.green)
+                .font(.caption2)
+            Text(row.layer).font(.caption).lineLimit(1)
+            Spacer()
+            Text(trailingText)
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    private var trailingText: String {
+        running ? "nguồn \(row.sourceCount)" : "\(row.candidateCount) → \(row.outputCount)"
     }
 }
