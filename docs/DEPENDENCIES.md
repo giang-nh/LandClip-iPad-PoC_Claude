@@ -125,7 +125,9 @@ Cần đưa ghi nguồn EPSG + danh sách 5 component vào màn "Acknowledgement
 - [x] Chốt cách xử lý GEOS/LGPL-2.1 cho bản PoC (giữ static, không phân phối; điều
   kiện phân phối đã ghi rõ).
 
-## Việc chuyển sang Giai đoạn 3 phải làm
+## Việc chuyển sang phân phối phải làm
 
-- Quyết định GEOS động vs relink-kit và implement trước khi có build phân phối.
-- Bổ sung màn Acknowledgements/Legal trong app.
+- [x] Bổ sung màn Acknowledgements/Legal trong app (`AcknowledgementsView`, nút ⓘ).
+- [ ] Chuyển GEOS sang framework động (hoặc relink-kit) — các bước chính xác:
+  [`GEOS_DYNAMIC_PLAN.md`](GEOS_DYNAMIC_PLAN.md). Làm ngay trước bản TestFlight đầu
+  tiên, verify bằng chính bản đó trên iPad.

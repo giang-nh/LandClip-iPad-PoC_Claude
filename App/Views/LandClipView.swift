@@ -8,6 +8,12 @@ struct LandClipView: View {
     @State private var importingAOI = false
     @State private var showResults = false
     @State private var showAcknowledgements = false
+    @State private var camera: MapCameraPosition = .region(
+        MKCoordinateRegion(
+            center: CLLocationCoordinate2D(latitude: 16.0, longitude: 106.0),
+            span: MKCoordinateSpan(latitudeDelta: 12, longitudeDelta: 12)
+        )
+    )
 
     var body: some View {
         NavigationStack {
@@ -97,7 +103,7 @@ struct LandClipView: View {
 
     private var mapLayer: some View {
         MapReader { proxy in
-            Map {
+            Map(position: $camera) {
                 if model.aoiVertices.count >= 3 {
                     MapPolygon(coordinates: model.aoiVertices)
                         .foregroundStyle(.blue.opacity(0.20))
