@@ -60,6 +60,15 @@ char *landclip_clip_package_json(const char *gdb_paths_json,
                                  void *progress_context,
                                  char **error_message);
 
+/// Exports up to `max_features` features of one layer (of a GeoPackage or File
+/// Geodatabase) as a WGS-84 GeoJSON FeatureCollection string, for map preview.
+/// `max_features <= 0` means no limit. Owned by the caller; NULL + error_message
+/// on failure.
+char *landclip_read_layer_geojson(const char *dataset_path,
+                                  const char *layer_name,
+                                  int max_features,
+                                  char **error_message);
+
 #ifdef __cplusplus
 }
 #endif

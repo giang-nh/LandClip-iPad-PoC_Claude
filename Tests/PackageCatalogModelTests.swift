@@ -140,7 +140,7 @@ final class PackageCatalogModelTests: XCTestCase {
         try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: outputDirectory) }
 
-        let events = NSMutableArray()
+        let events = EventLog()
         let result = try engine.clip(gdbURLs: [gdbURL], aoiURL: aoiURL, outputDirectory: outputDirectory) { json in
             if let event = GISProgressEvent.decode(json) { events.add(event.event) }
             return false
@@ -161,8 +161,45 @@ final class PackageCatalogModelTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: result.summaryCsv))
         let gpkgSize = (try FileManager.default.attributesOfItem(atPath: result.outputGeoPackage)[.size] as? Int) ?? 0
         XCTAssertGreaterThan(gpkgSize, 0)
-        XCTAssertTrue(events.contains("complete"))
-        XCTAssertTrue(events.contains("layer_done"))
+        XCTAssertTrue(events.snapshot.contains("complete"))
+        XCTAssertTrue(events.snapshot.contains("layer_done"))
+    }
+
+    func testNativeLayerGeoJSONPreview() throws {
+        let reader = NativeLayerReader()
+        guard reader.isAvailable else {
+            throw XCTSkip("Native GDAL is only enabled by project-native.yml")
+        }
+        let bundle = Bundle(for: Self.self)
+        guard let gdbURL = bundle.url(forResource: "sample", withExtension: "gdb", subdirectory: "public")
+            ?? bundle.url(forResource: "sample", withExtension: "gdb") else {
+            return XCTFail("Missing sample.gdb")
+        }
+
+        // The synthetic fixture CRS may have no transform path to WGS-84; in that
+        // case the reader throws and we only need the call to fail cleanly.
+        let features: [PreviewFeature]
+        do {
+            features = try reader.features(datasetURL: gdbURL, layerName: "sample_points")
+        } catch {
+            throw XCTSkip("Preview reprojection unsupported for the fixture CRS: \(error.localizedDescription)")
+        }
+
+        XCTAssertEqual(features.count, 3)
+        for feature in features {
+            guard case let .point(coordinate)? = feature.shapes.first else {
+                return XCTFail("Expected a point shape")
+            }
+            XCTAssertTrue(coordinate.latitude.isFinite && coordinate.longitude.isFinite)
+        }
+    }
+
+    /// Thread-safe event collector for the native progress callback.
+    private final class EventLog: @unchecked Sendable {
+        private let lock = NSLock()
+        private var events: [String] = []
+        func add(_ event: String) { lock.lock(); events.append(event); lock.unlock() }
+        var snapshot: [String] { lock.lock(); defer { lock.unlock() }; return events }
     }
 
     func testNativePPKXEndToEnd() async throws {

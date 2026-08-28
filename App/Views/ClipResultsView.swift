@@ -22,19 +22,17 @@ struct ClipResultsView: View {
                 }
                 Section("Chi tiết") {
                     ForEach(filtered) { layer in
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text(layer.sourceLayer).font(.headline)
-                                Spacer()
-                                statusBadge(layer.status)
+                        if layer.status == "written" {
+                            NavigationLink {
+                                LayerPreviewView(
+                                    datasetURL: result.outputGeoPackageURL,
+                                    layerName: layer.outputLayer
+                                )
+                            } label: {
+                                row(layer)
                             }
-                            Text("\(layer.gdb) · \(layer.geometryType)")
-                                .font(.caption).foregroundStyle(.secondary)
-                            Text("nguồn \(layer.sourceCount) · ứng viên \(layer.candidateCount) · kết quả \(layer.outputCount)")
-                                .font(.caption2).foregroundStyle(.secondary)
-                            if !layer.message.isEmpty {
-                                Text(layer.message).font(.caption2).foregroundStyle(.orange)
-                            }
+                        } else {
+                            row(layer)
                         }
                     }
                 }
@@ -53,6 +51,23 @@ struct ClipResultsView: View {
                         SharePreview(url.lastPathComponent)
                     }
                 }
+            }
+        }
+    }
+
+    private func row(_ layer: ClipLayerResult) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(layer.sourceLayer).font(.headline)
+                Spacer()
+                statusBadge(layer.status)
+            }
+            Text("\(layer.gdb) · \(layer.geometryType)")
+                .font(.caption).foregroundStyle(.secondary)
+            Text("nguồn \(layer.sourceCount) · ứng viên \(layer.candidateCount) · kết quả \(layer.outputCount)")
+                .font(.caption2).foregroundStyle(.secondary)
+            if !layer.message.isEmpty {
+                Text(layer.message).font(.caption2).foregroundStyle(.orange)
             }
         }
     }

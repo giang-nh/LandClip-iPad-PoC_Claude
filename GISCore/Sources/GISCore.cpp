@@ -20,6 +20,7 @@
 #include <cpl_string.h>
 #include <cpl_vsi.h>
 #include <gdal.h>
+#include <gdal_utils.h>
 #include <ogr_api.h>
 #include <ogr_srs_api.h>
 #endif
@@ -719,6 +720,81 @@ char *landclip_clip_package_json(const char *gdb_paths_json,
     (void)out_csv_path;
     (void)progress;
     (void)progress_context;
+    if (error_message != nullptr) *error_message = copy_string("GISCore was built without GDAL.");
+    return nullptr;
+#endif
+}
+
+char *landclip_read_layer_geojson(const char *dataset_path,
+                                  const char *layer_name,
+                                  int max_features,
+                                  char **error_message) {
+    if (error_message != nullptr) *error_message = nullptr;
+#if LANDCLIP_WITH_GDAL
+    if (dataset_path == nullptr || layer_name == nullptr) {
+        if (error_message != nullptr) *error_message = copy_string("Layer preview arguments are incomplete.");
+        return nullptr;
+    }
+    GDALAllRegister();
+    GDALDatasetH source = GDALOpenEx(dataset_path, GDAL_OF_VECTOR | GDAL_OF_READONLY,
+                                     nullptr, nullptr, nullptr);
+    if (source == nullptr) {
+        if (error_message != nullptr) *error_message = copy_string("Could not open the dataset.");
+        return nullptr;
+    }
+
+    // RFC7946=YES makes the GeoJSON driver reproject to WGS 84 (CRS84) on its own.
+    char **argv = nullptr;
+    argv = CSLAddString(argv, "-f");
+    argv = CSLAddString(argv, "GeoJSON");
+    argv = CSLAddString(argv, "-lco");
+    argv = CSLAddString(argv, "RFC7946=YES");
+    if (max_features > 0) {
+        argv = CSLAddString(argv, "-limit");
+        argv = CSLAddString(argv, std::to_string(max_features).c_str());
+    }
+    argv = CSLAddString(argv, layer_name);
+
+    GDALVectorTranslateOptions *options = GDALVectorTranslateOptionsNew(argv, nullptr);
+    CSLDestroy(argv);
+    if (options == nullptr) {
+        GDALClose(source);
+        if (error_message != nullptr) *error_message = copy_string("Invalid preview options.");
+        return nullptr;
+    }
+
+    const char *memory_path = "/vsimem/landclip_preview.geojson";
+    VSIUnlink(memory_path);
+    int usage_error = FALSE;
+    GDALDatasetH output = GDALVectorTranslate(memory_path, nullptr, 1, &source, options, &usage_error);
+    GDALVectorTranslateOptionsFree(options);
+    GDALClose(source);
+    if (output == nullptr) {
+        VSIUnlink(memory_path);
+        if (error_message != nullptr) *error_message = copy_string("Could not export the layer.");
+        return nullptr;
+    }
+    GDALClose(output);
+
+    vsi_l_offset length = 0;
+    GByte *buffer = VSIGetMemFileBuffer(memory_path, &length, FALSE);
+    char *result = nullptr;
+    if (buffer != nullptr) {
+        result = static_cast<char *>(std::malloc(static_cast<size_t>(length) + 1));
+        if (result != nullptr) {
+            std::memcpy(result, buffer, static_cast<size_t>(length));
+            result[length] = '\0';
+        }
+    }
+    VSIUnlink(memory_path);
+    if (result == nullptr && error_message != nullptr) {
+        *error_message = copy_string("Empty layer export.");
+    }
+    return result;
+#else
+    (void)dataset_path;
+    (void)layer_name;
+    (void)max_features;
     if (error_message != nullptr) *error_message = copy_string("GISCore was built without GDAL.");
     return nullptr;
 #endif
