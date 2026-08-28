@@ -7,6 +7,7 @@ struct LandClipView: View {
     @State private var importingPackage = false
     @State private var importingAOI = false
     @State private var showResults = false
+    @State private var showAcknowledgements = false
 
     var body: some View {
         NavigationStack {
@@ -27,9 +28,7 @@ struct LandClipView: View {
                         #if DEBUG
                         if LandClipViewModel.bundledSamplePackage != nil {
                             Button {
-                                if let url = LandClipViewModel.bundledSamplePackage {
-                                    model.openPackage(url)
-                                }
+                                model.openDemo()
                             } label: {
                                 Label("Thử nhanh (dữ liệu mẫu)", systemImage: "sparkles")
                             }
@@ -42,6 +41,13 @@ struct LandClipView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     if model.catalog != nil {
                         Button("Bắt đầu lại", role: .destructive) { model.reset() }
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showAcknowledgements = true
+                    } label: {
+                        Image(systemName: "info.circle")
                     }
                 }
             }
@@ -70,6 +76,9 @@ struct LandClipView: View {
                 if let result = model.result {
                     ClipResultsView(result: result)
                 }
+            }
+            .sheet(isPresented: $showAcknowledgements) {
+                AcknowledgementsView()
             }
             .onChange(of: model.stage) { _, stage in
                 if stage == .done { showResults = true }

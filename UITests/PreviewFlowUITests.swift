@@ -22,22 +22,21 @@ final class PreviewFlowUITests: XCTestCase {
         XCTAssertTrue(quickTry.waitForExistence(timeout: 5), "quick-try shortcut missing")
         quickTry.tap()
 
-        // Catalog ready.
+        // Catalog ready + the bundled demo AOI loaded automatically.
         let ready = app.staticTexts.containing(
             NSPredicate(format: "label CONTAINS[c] 'hỗ trợ clip'")
         ).firstMatch
         XCTAssertTrue(ready.waitForExistence(timeout: 30), "catalog never became ready")
         snap("02-catalog")
 
-        // Draw an AOI by tapping the map (top area; control panel is at the bottom).
+        // Also drop a couple of manual AOI points to show the drawing UI.
         let window = app.windows.firstMatch
-        for offset in [CGVector(dx: 0.30, dy: 0.28), CGVector(dx: 0.68, dy: 0.30),
-                       CGVector(dx: 0.66, dy: 0.55), CGVector(dx: 0.32, dy: 0.52)] {
+        for offset in [CGVector(dx: 0.40, dy: 0.30), CGVector(dx: 0.60, dy: 0.55)] {
             window.coordinate(withNormalizedOffset: offset).tap()
         }
-        snap("03-aoi-drawn")
+        snap("03-aoi")
 
-        // Run the clip.
+        // Run the clip (demo AOI is already loaded, so this is enabled).
         let clip = app.buttons.containing(
             NSPredicate(format: "label BEGINSWITH 'Trích xuất'")
         ).firstMatch

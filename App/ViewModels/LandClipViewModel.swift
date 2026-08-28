@@ -89,6 +89,22 @@ final class LandClipViewModel: ObservableObject {
             ?? Bundle.main.url(forResource: "sample", withExtension: "ppkx")
     }
 
+    static var bundledSampleAOI: URL? {
+        Bundle.main.url(forResource: "sample-aoi", withExtension: "geojson", subdirectory: "public")
+            ?? Bundle.main.url(forResource: "sample-aoi", withExtension: "geojson")
+    }
+
+    /// DEBUG shortcut: open the bundled package and, once ready, load the
+    /// matching bundled AOI so the clip produces real results without any
+    /// file picking.
+    func openDemo() {
+        guard let package = LandClipViewModel.bundledSamplePackage else { return }
+        pendingDemoAOI = LandClipViewModel.bundledSampleAOI
+        openPackage(package)
+    }
+
+    private var pendingDemoAOI: URL?
+
     func openPackage(_ url: URL) {
         worker?.cancel()
         cancelFlag.cancel()
@@ -114,6 +130,10 @@ final class LandClipViewModel: ObservableObject {
                 self.prepared = prepared
                 self.catalog = prepared.catalog
                 self.stage = .ready
+                if let demoAOI = self.pendingDemoAOI {
+                    self.pendingDemoAOI = nil
+                    self.importAOI(demoAOI)
+                }
             } catch is CancellationError {
                 self.stage = .idle
             } catch {
@@ -189,6 +209,7 @@ final class LandClipViewModel: ObservableObject {
         cancelFlag.cancel()
         cleanup()
         clearImportedAOI()
+        pendingDemoAOI = nil
         prepared = nil
         catalog = nil
         result = nil
