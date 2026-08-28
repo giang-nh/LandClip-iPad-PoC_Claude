@@ -35,13 +35,16 @@ struct NativeClipEngine: Sendable {
         outputDirectory: URL,
         selectedLayers: [String] = [],
         skipLayers: [String] = [],
+        resume: Bool = false,
         onEvent: @escaping GISProgressBridge.Handler = { _ in false }
     ) throws -> ClipResult {
         guard isAvailable else { throw ClipEngineError.unavailable }
 
         let gpkgURL = outputDirectory.appendingPathComponent("result.gpkg")
         let csvURL = outputDirectory.appendingPathComponent("result_summary.csv")
-        for stale in [gpkgURL, csvURL] { try? FileManager.default.removeItem(at: stale) }
+        if !resume {
+            for stale in [gpkgURL, csvURL] { try? FileManager.default.removeItem(at: stale) }
+        }
 
         let pathsJSON = String(
             data: try JSONEncoder().encode(gdbURLs.map(\.path)),

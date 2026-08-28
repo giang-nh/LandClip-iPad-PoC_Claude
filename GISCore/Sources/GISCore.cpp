@@ -650,8 +650,19 @@ char *landclip_clip_package_json(const char *gdb_paths_json,
         if (error_message != nullptr) *error_message = copy_string("The GPKG driver is unavailable.");
         return nullptr;
     }
+    // Resume: when some layers are being skipped and the output already exists,
+    // append to it instead of starting over.
+    VSIStatBufL out_stat;
+    const bool resuming = !skip_layers.empty() && VSIStatL(out_gpkg_path, &out_stat) == 0;
     DatasetGuard out_dataset;
-    out_dataset.handle = GDALCreate(gpkg_driver, out_gpkg_path, 0, 0, 0, GDT_Unknown, nullptr);
+    if (resuming) {
+        out_dataset.handle = GDALOpenEx(out_gpkg_path, GDAL_OF_VECTOR | GDAL_OF_UPDATE,
+                                        nullptr, nullptr, nullptr);
+    }
+    if (out_dataset.handle == nullptr) {
+        VSIUnlink(out_gpkg_path);
+        out_dataset.handle = GDALCreate(gpkg_driver, out_gpkg_path, 0, 0, 0, GDT_Unknown, nullptr);
+    }
     if (out_dataset.handle == nullptr) {
         if (error_message != nullptr) *error_message = copy_string("Could not create the output GeoPackage.");
         return nullptr;
@@ -704,6 +715,9 @@ char *landclip_clip_package_json(const char *gdb_paths_json,
             outcome.source_layer = layer_name;
             outcome.geometry_type = geometry_type_name(geom_type);
             outcome.source_count = OGR_L_GetFeatureCount(layer, false);
+            // Reserve the deterministic output name for every layer we keep, so
+            // resumed runs name their new layers exactly as the first run did.
+            outcome.output_layer = sanitize_layer_name(gdb_stem, layer_name, used_names);
 
             if (set_contains(skip_layers, layer_key)) {
                 outcome.status = "reused";
@@ -761,8 +775,7 @@ char *landclip_clip_package_json(const char *gdb_paths_json,
             OGR_L_SetSpatialFilter(layer, local_aoi.handle);
             OGR_L_ResetReading(layer);
 
-            const std::string output_name = sanitize_layer_name(gdb_stem, layer_name, used_names);
-            outcome.output_layer = output_name;
+            const std::string &output_name = outcome.output_layer;
             OGRLayerH out_layer = nullptr;
             const bool is_point = (family == "Point");
 
@@ -837,11 +850,8 @@ char *landclip_clip_package_json(const char *gdb_paths_json,
     GDALClose(out_dataset.handle);
     out_dataset.handle = nullptr;
 
-    if (cancelled) {
-        VSIUnlink(out_gpkg_path);
-        if (error_message != nullptr) *error_message = copy_string("Clip cancelled.");
-        return nullptr;
-    }
+    // On cancel we keep the GeoPackage: every cancel lands on a layer boundary,
+    // so it only holds fully-written layers — a later run resumes from here.
 
     std::ofstream csv(out_csv_path, std::ios::binary);
     csv << "gdb,source_layer,output_layer,geometry_type,source_count,candidate_count,"
@@ -850,6 +860,7 @@ char *landclip_clip_package_json(const char *gdb_paths_json,
     std::ostringstream summary;
     summary << "{\"outputGeoPackage\":" << json_string(out_gpkg_path)
             << ",\"summaryCsv\":" << json_string(out_csv_path)
+            << ",\"cancelled\":" << (cancelled ? "true" : "false")
             << ",\"aoiAreaSqMeters\":" << aoi_area_m2
             << ",\"aoiPerimeterMeters\":" << aoi_perimeter_m
             << ",\"layers\":[";
@@ -875,7 +886,8 @@ char *landclip_clip_package_json(const char *gdb_paths_json,
     summary << "],\"writtenLayerCount\":" << written_layers << "}";
     csv.close();
 
-    report_progress(progress, progress_context, "{\"event\":\"complete\"}");
+    report_progress(progress, progress_context,
+                    cancelled ? "{\"event\":\"cancelled\"}" : "{\"event\":\"complete\"}");
     return copy_string(summary.str().c_str());
 #else
     (void)gdb_paths_json;

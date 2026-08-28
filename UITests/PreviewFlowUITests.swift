@@ -14,6 +14,14 @@ final class PreviewFlowUITests: XCTestCase {
     }
 
     func testWalkthrough() {
+        // First launch asks for a user name.
+        let nameField = app.textFields.firstMatch
+        if nameField.waitForExistence(timeout: 5) {
+            nameField.tap()
+            nameField.typeText("Người kiểm thử")
+            app.buttons["Lưu"].tap()
+        }
+
         snap("01-home")
 
         // Open menu → quick-try with the bundled synthetic package.

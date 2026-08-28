@@ -43,6 +43,15 @@ final class LandClipViewModel: ObservableObject {
     @Published private(set) var progress = Report()
     @Published private(set) var catalog: PackageCatalog?
     @Published private(set) var result: ClipResult?
+    /// A partially-finished (cancelled) result the next run can resume from.
+    @Published private(set) var partialResult: ClipResult?
+    /// When true, the next run ignores `partialResult` and starts over.
+    @Published var restartFromScratch = false
+
+    private static let processorVersion = "1"
+    private var lastRunSignature: String?
+
+    var canResume: Bool { partialResult != nil && !restartFromScratch }
     enum DrawMode { case polygon, rectangle }
     @Published var drawMode: DrawMode = .polygon
     /// AOI polygon vertices in WGS-84, in the order the user tapped them.
@@ -177,6 +186,9 @@ final class LandClipViewModel: ObservableObject {
         result = nil
         aoiVertices = []
         deselectedLayerKeys = []
+        partialResult = nil
+        lastRunSignature = nil
+        restartFromScratch = false
         progress = Report()
         stage = .preparing(url.lastPathComponent)
 
@@ -229,12 +241,23 @@ final class LandClipViewModel: ObservableObject {
         cancelFlag = flag
         let handler = progressHandler(flag)
 
+        let signature = runSignature()
+        let resuming = canResume && lastRunSignature == signature && clipOutputDirectory != nil
+        let priorPartial = resuming ? partialResult : nil
+        let skip = priorPartial?.completedLayerKeys ?? []
+        let selected = self.selectedLayerKeys
+
         worker = Task {
             do {
-                let outputDirectory = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("LandClipOutput-\(UUID().uuidString)", isDirectory: true)
-                try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
-                self.clipOutputDirectory = outputDirectory
+                let outputDirectory: URL
+                if resuming, let existing = self.clipOutputDirectory {
+                    outputDirectory = existing
+                } else {
+                    outputDirectory = FileManager.default.temporaryDirectory
+                        .appendingPathComponent("LandClipOutput-\(UUID().uuidString)", isDirectory: true)
+                    try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+                    self.clipOutputDirectory = outputDirectory
+                }
 
                 let aoiURL: URL
                 if let importedURL {
@@ -244,31 +267,74 @@ final class LandClipViewModel: ObservableObject {
                     try LandClipViewModel.writeAOI(vertices, to: aoiURL)
                 }
 
-                let selected = self.selectedLayerKeys
-                let clipResult = try await Task.detached(priority: .userInitiated) {
+                var clipResult = try await Task.detached(priority: .userInitiated) {
                     try NativeClipEngine().clip(
                         gdbURLs: geodatabaseURLs,
                         aoiURL: aoiURL,
                         outputDirectory: outputDirectory,
                         selectedLayers: selected,
+                        skipLayers: skip,
+                        resume: resuming,
                         onEvent: handler
                     )
                 }.value
 
-                guard !flag.isCancelled else { self.stage = .ready; return }
-                self.result = clipResult
-                self.stage = .done
-            } catch let error as ClipEngineError {
-                if case .cancelled = error { self.stage = .ready } else { self.stage = .failed(error.localizedDescription) }
+                if let priorPartial {
+                    clipResult = clipResult.merging(reusedFrom: priorPartial)
+                    clipResult.rewriteCSV()
+                }
+                self.lastRunSignature = signature
+
+                if clipResult.cancelled {
+                    self.partialResult = clipResult
+                    self.stage = .ready
+                    self.progress.phase = "Đã dừng — còn "
+                        + "\(self.selectedLayerCount - clipResult.completedLayerKeys.count)/\(self.selectedLayerCount) layer"
+                } else {
+                    self.partialResult = nil
+                    self.restartFromScratch = false
+                    self.result = clipResult
+                    self.stage = .done
+                }
             } catch {
                 self.stage = flag.isCancelled ? .ready : .failed(error.localizedDescription)
             }
         }
     }
 
+    /// Identifies an input configuration for resume: same package + AOI + layer
+    /// selection + engine version means a stop can be continued.
+    private func runSignature() -> String {
+        let aoiPart: String
+        if let name = importedAOIName {
+            aoiPart = "file:\(name)"
+        } else {
+            aoiPart = aoiVertices
+                .map { String(format: "%.6f,%.6f", $0.latitude, $0.longitude) }
+                .joined(separator: ";")
+        }
+        return [
+            catalog?.packageName ?? "",
+            aoiPart,
+            selectedLayerKeys.sorted().joined(separator: ","),
+            LandClipViewModel.processorVersion,
+        ].joined(separator: "|")
+    }
+
     func cancel() {
         cancelFlag.cancel()
         worker?.cancel()
+    }
+
+    /// Discard the partial result so the next run reprocesses everything.
+    func startOver() {
+        partialResult = nil
+        lastRunSignature = nil
+        restartFromScratch = false
+        if let directory = clipOutputDirectory {
+            try? FileManager.default.removeItem(at: directory)
+            clipOutputDirectory = nil
+        }
     }
 
     func reset() {
@@ -282,6 +348,9 @@ final class LandClipViewModel: ObservableObject {
         result = nil
         aoiVertices = []
         deselectedLayerKeys = []
+        partialResult = nil
+        lastRunSignature = nil
+        restartFromScratch = false
         progress = Report()
         stage = .idle
     }
@@ -315,6 +384,9 @@ final class LandClipViewModel: ObservableObject {
             }
         case "complete":
             progress.phase = "Hoàn tất"
+            progress.detail = ""
+        case "cancelled":
+            progress.phase = "Đã dừng"
             progress.detail = ""
         default:
             break

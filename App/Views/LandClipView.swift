@@ -4,11 +4,14 @@ import UniformTypeIdentifiers
 
 struct LandClipView: View {
     @StateObject private var model = LandClipViewModel()
+    @EnvironmentObject private var profile: UserProfile
+    @EnvironmentObject private var ratings: RatingStore
     @State private var importingPackage = false
     @State private var importingAOI = false
     @State private var showResults = false
     @State private var showAcknowledgements = false
     @State private var showLayerSelection = false
+    @State private var showNameSheet = false
     @State private var satellite = true
     @State private var camera: MapCameraPosition = .region(
         MKCoordinateRegion(
@@ -52,8 +55,18 @@ struct LandClipView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showAcknowledgements = true
+                    Menu {
+                        Button {
+                            showNameSheet = true
+                        } label: {
+                            Label(profile.hasName ? "Người dùng: \(profile.name)" : "Khai báo người dùng",
+                                  systemImage: "person")
+                        }
+                        Button {
+                            showAcknowledgements = true
+                        } label: {
+                            Label("Ghi nhận & Pháp lý", systemImage: "doc.text")
+                        }
                     } label: {
                         Image(systemName: "info.circle")
                     }
@@ -83,6 +96,7 @@ struct LandClipView: View {
             .sheet(isPresented: $showResults) {
                 if let result = model.result {
                     ClipResultsView(result: result)
+                        .environmentObject(ratings)
                 }
             }
             .sheet(isPresented: $showAcknowledgements) {
@@ -91,6 +105,10 @@ struct LandClipView: View {
             .sheet(isPresented: $showLayerSelection) {
                 LayerSelectionView(model: model)
             }
+            .sheet(isPresented: $showNameSheet) {
+                UserNameSheet().environmentObject(profile)
+            }
+            .onAppear { if !profile.hasName { showNameSheet = true } }
             .onChange(of: model.stage) { _, stage in
                 if stage == .done { showResults = true }
             }
@@ -274,17 +292,32 @@ struct LandClipView: View {
         }
     }
 
+    @ViewBuilder
     private var clipButton: some View {
-        Button {
-            model.runClip()
-        } label: {
-            Text(model.hasAOI
-                 ? "Trích xuất \(model.selectedLayerCount) layer"
-                 : "Chạm lên bản đồ để vẽ AOI (≥ 3 điểm) hoặc nhập file")
-            .frame(maxWidth: .infinity)
+        HStack {
+            Button {
+                if profile.hasName { model.runClip() } else { showNameSheet = true }
+            } label: {
+                Text(clipLabel).frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!model.canClip)
+
+            if model.canResume {
+                Button {
+                    model.startOver()
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                }
+                .buttonStyle(.bordered)
+            }
         }
-        .buttonStyle(.borderedProminent)
-        .disabled(!model.canClip)
+    }
+
+    private var clipLabel: String {
+        if !model.hasAOI { return "Chạm lên bản đồ để vẽ AOI (≥ 3 điểm) hoặc nhập file" }
+        if model.canResume { return "Tiếp tục trích xuất" }
+        return "Trích xuất \(model.selectedLayerCount) layer"
     }
 
     private func progressCard(title: String) -> some View {

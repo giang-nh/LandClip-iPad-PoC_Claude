@@ -5,6 +5,10 @@ struct ClipResultsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var filter = ""
 
+    private var jobID: String {
+        result.outputGeoPackageURL.deletingLastPathComponent().lastPathComponent
+    }
+
     private var filtered: [ClipLayerResult] {
         guard !filter.isEmpty else { return result.layers }
         let needle = filter.lowercased()
@@ -24,21 +28,25 @@ struct ClipResultsView: View {
                         LabeledContent("Chu vi AOI", value: Self.lengthText(result.aoiPerimeterMeters))
                     }
                 }
-                Section("Chi tiết") {
+                Section {
                     ForEach(filtered) { layer in
-                        if layer.status == "written" {
-                            NavigationLink {
-                                LayerPreviewView(
-                                    datasetURL: result.outputGeoPackageURL,
-                                    layerName: layer.outputLayer
-                                )
-                            } label: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            if layer.status == "written" {
+                                NavigationLink {
+                                    LayerPreviewView(
+                                        datasetURL: result.outputGeoPackageURL,
+                                        layerName: layer.outputLayer,
+                                        jobID: jobID
+                                    )
+                                } label: { row(layer) }
+                                RatingControl(key: "\(jobID)/layer/\(layer.outputLayer)")
+                            } else {
                                 row(layer)
                             }
-                        } else {
-                            row(layer)
                         }
                     }
+                } header: {
+                    HStack { Text("Đánh giá kết quả"); RatingHelpButton() }
                 }
             }
             .searchable(text: $filter, prompt: "Lọc theo layer hoặc geodatabase")

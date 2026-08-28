@@ -5,6 +5,7 @@ import MapKit
 struct LayerPreviewView: View {
     let datasetURL: URL
     let layerName: String
+    var jobID: String = ""
 
     @State private var features: [PreviewFeature] = []
     @State private var selectedID: PreviewFeature.ID?
@@ -75,6 +76,10 @@ struct LayerPreviewView: View {
                         ForEach(feature.attributes, id: \.key) { attribute in
                             LabeledContent(attribute.key, value: attribute.value.isEmpty ? "—" : attribute.value)
                                 .font(.caption)
+                        }
+                        if !jobID.isEmpty {
+                            RatingControl(key: "\(jobID)/feature/\(layerName)/\(feature.id)")
+                                .padding(.top, 4)
                         }
                     } label: {
                         Text(feature.title).font(.subheadline)
