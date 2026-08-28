@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 protocol PackageScanning: Sendable {
     func scan(packageURL: URL) async throws -> PackageCatalog
@@ -40,6 +41,7 @@ struct PreparedPackage: Sendable {
     let catalog: PackageCatalog
     let geodatabaseURLs: [URL]
     let jobDirectory: URL
+    var sha256: String = ""
 }
 
 struct NativePackageScanner: PackageScanning {
@@ -73,6 +75,7 @@ struct NativePackageScanner: PackageScanning {
                 _ = onEvent(#"{"event":"phase","phase":"copy"}"#)
                 try Task.checkCancellation()
                 try Self.copyStreaming(from: packageURL, to: archiveURL)
+                let sha = Self.sha256(of: archiveURL)
 
                 _ = onEvent(#"{"event":"phase","phase":"extract"}"#)
                 try Task.checkCancellation()
@@ -96,13 +99,30 @@ struct NativePackageScanner: PackageScanning {
                         layers: layers
                     ),
                     geodatabaseURLs: geodatabases,
-                    jobDirectory: jobDirectory
+                    jobDirectory: jobDirectory,
+                    sha256: sha
                 )
             } catch {
                 try? fileManager.removeItem(at: jobDirectory)
                 throw error
             }
         }.value
+    }
+
+    private static func sha256(of url: URL) -> String {
+        guard let stream = InputStream(url: url) else { return "" }
+        stream.open()
+        defer { stream.close() }
+        var hasher = SHA256()
+        let bufferSize = 1024 * 1024
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+        defer { buffer.deallocate() }
+        while stream.hasBytesAvailable {
+            let read = stream.read(buffer, maxLength: bufferSize)
+            if read <= 0 { break }
+            hasher.update(bufferPointer: UnsafeRawBufferPointer(start: buffer, count: read))
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     private static func copyStreaming(from source: URL, to destination: URL) throws {

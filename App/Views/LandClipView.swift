@@ -12,6 +12,7 @@ struct LandClipView: View {
     @State private var showAcknowledgements = false
     @State private var showLayerSelection = false
     @State private var showNameSheet = false
+    @State private var showAuditLog = false
     @State private var satellite = true
     @State private var camera: MapCameraPosition = .region(
         MKCoordinateRegion(
@@ -63,6 +64,11 @@ struct LandClipView: View {
                                   systemImage: "person")
                         }
                         Button {
+                            showAuditLog = true
+                        } label: {
+                            Label("Nhật ký hoạt động", systemImage: "list.bullet.rectangle")
+                        }
+                        Button {
                             showAcknowledgements = true
                         } label: {
                             Label("Ghi nhận & Pháp lý", systemImage: "doc.text")
@@ -102,13 +108,21 @@ struct LandClipView: View {
             .sheet(isPresented: $showAcknowledgements) {
                 AcknowledgementsView()
             }
+            .sheet(isPresented: $showAuditLog) {
+                AuditLogView()
+            }
             .sheet(isPresented: $showLayerSelection) {
                 LayerSelectionView(model: model)
             }
             .sheet(isPresented: $showNameSheet) {
                 UserNameSheet().environmentObject(profile)
             }
-            .onAppear { if !profile.hasName { showNameSheet = true } }
+            .onAppear {
+                model.operatorName = profile.name
+                if !profile.hasName { showNameSheet = true }
+                Audit.record("app_open", user: profile.name)
+            }
+            .onChange(of: profile.name) { _, name in model.operatorName = name }
             .onChange(of: model.stage) { _, stage in
                 if stage == .done { showResults = true }
             }

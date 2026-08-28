@@ -194,6 +194,40 @@ final class PackageCatalogModelTests: XCTestCase {
         XCTAssertEqual(result.layers.first { $0.sourceLayer == "sample_points" }?.status, "written")
     }
 
+    func testClipResumeAppends() throws {
+        let engine = NativeClipEngine()
+        guard engine.isAvailable else { throw XCTSkip("Native GDAL only under project-native.yml") }
+        let bundle = Bundle(for: Self.self)
+        guard
+            let gdbURL = bundle.url(forResource: "sample", withExtension: "gdb", subdirectory: "public")
+                ?? bundle.url(forResource: "sample", withExtension: "gdb"),
+            let aoiURL = bundle.url(forResource: "sample-aoi", withExtension: "geojson", subdirectory: "public")
+                ?? bundle.url(forResource: "sample-aoi", withExtension: "geojson")
+        else { return XCTFail("fixtures missing") }
+
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("resume-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: out) }
+
+        // First pass: only points.
+        _ = try engine.clip(gdbURLs: [gdbURL], aoiURL: aoiURL, outputDirectory: out,
+                            selectedLayers: ["sample::sample_points"])
+        // Resume: add lines, keep points.
+        let resumed = try engine.clip(
+            gdbURLs: [gdbURL], aoiURL: aoiURL, outputDirectory: out,
+            selectedLayers: ["sample::sample_points", "sample::sample_lines"],
+            skipLayers: ["sample::sample_points"],
+            resume: true
+        )
+        XCTAssertEqual(resumed.layers.first { $0.sourceLayer == "sample_points" }?.status, "reused")
+        XCTAssertEqual(resumed.layers.first { $0.sourceLayer == "sample_lines" }?.status, "written")
+
+        // Both layers must now be in the GeoPackage.
+        let names = try NativeLayerReader().features(datasetURL: resumed.outputGeoPackageURL,
+                                                    layerName: "sample_sample_lines")
+        XCTAssertFalse(names.isEmpty)
+    }
+
     func testDXFAOIClips() throws {
         let engine = NativeClipEngine()
         guard engine.isAvailable else {

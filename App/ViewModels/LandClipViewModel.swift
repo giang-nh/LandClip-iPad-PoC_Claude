@@ -50,6 +50,9 @@ final class LandClipViewModel: ObservableObject {
 
     private static let processorVersion = "1"
     private var lastRunSignature: String?
+    /// Declared operator name, mirrored from `UserProfile` for the audit trail.
+    var operatorName = ""
+    private var clipStartedAt: Date?
 
     var canResume: Bool { partialResult != nil && !restartFromScratch }
     enum DrawMode { case polygon, rectangle }
@@ -206,6 +209,12 @@ final class LandClipViewModel: ObservableObject {
                 self.prepared = prepared
                 self.catalog = prepared.catalog
                 self.stage = .ready
+                Audit.record("package_opened", user: self.operatorName) {
+                    $0.packageName = prepared.catalog.packageName
+                    $0.packageSize = prepared.catalog.packageSize
+                    $0.packageSHA256 = prepared.sha256
+                    $0.layerCount = prepared.catalog.layers.count
+                }
                 if let demoAOI = self.pendingDemoAOI {
                     self.pendingDemoAOI = nil
                     self.importAOI(demoAOI)
@@ -241,6 +250,12 @@ final class LandClipViewModel: ObservableObject {
         cancelFlag = flag
         let handler = progressHandler(flag)
 
+        clipStartedAt = Date()
+        Audit.record("clip_started", user: operatorName) {
+            $0.packageName = catalog?.packageName
+            $0.packageSHA256 = prepared.sha256
+            $0.selectedLayers = selectedLayerCount
+        }
         let signature = runSignature()
         let resuming = canResume && lastRunSignature == signature && clipOutputDirectory != nil
         let priorPartial = resuming ? partialResult : nil
@@ -285,19 +300,36 @@ final class LandClipViewModel: ObservableObject {
                 }
                 self.lastRunSignature = signature
 
+                let elapsed = Int((Date().timeIntervalSince(self.clipStartedAt ?? Date())) * 1000)
                 if clipResult.cancelled {
                     self.partialResult = clipResult
                     self.stage = .ready
                     self.progress.phase = "Đã dừng — còn "
                         + "\(self.selectedLayerCount - clipResult.completedLayerKeys.count)/\(self.selectedLayerCount) layer"
+                    Audit.record("clip_cancelled", user: self.operatorName) {
+                        $0.packageName = self.catalog?.packageName
+                        $0.writtenLayers = clipResult.writtenLayerCount
+                        $0.durationMs = elapsed
+                    }
                 } else {
                     self.partialResult = nil
                     self.restartFromScratch = false
                     self.result = clipResult
                     self.stage = .done
+                    Audit.record("clip_completed", user: self.operatorName) {
+                        $0.packageName = self.catalog?.packageName
+                        $0.writtenLayers = clipResult.writtenLayerCount
+                        $0.selectedLayers = clipResult.layers.count
+                        $0.durationMs = elapsed
+                    }
                 }
             } catch {
                 self.stage = flag.isCancelled ? .ready : .failed(error.localizedDescription)
+                if !flag.isCancelled {
+                    Audit.record("clip_failed", user: self.operatorName) {
+                        $0.message = error.localizedDescription
+                    }
+                }
             }
         }
     }
