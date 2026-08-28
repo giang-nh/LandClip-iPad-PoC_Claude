@@ -43,19 +43,24 @@ int landclip_archive_extract_ppkx(const char *package_path,
 /// results) plus a CSV summary.
 ///
 /// - gdb_paths_json: JSON array of absolute `.gdb` directory paths.
-/// - aoi_path: a GeoJSON or GeoPackage file holding one or more polygons; all
-///   are unioned. The file must carry a CRS.
+/// - aoi_path: a GeoJSON, GeoPackage or DXF file holding one or more polygons
+///   (or closed polylines); all are unioned. The file must carry a CRS.
 /// - out_gpkg_path / out_csv_path: destinations, must not already exist.
+/// - options_json: may be NULL. `{"layers":["gdb::name",...]}` restricts the run
+///   to those source layers; `{"skipLayers":["gdb::name",...]}` marks layers as
+///   already done (status "reused") for resume-after-stop.
 /// - progress: may be NULL; receives `phase` / `layer_start` / `layer_done` /
 ///   `complete` events and can cancel at layer boundaries.
 ///
 /// Returns a UTF-8 JSON summary string (owned by the caller) on success, or NULL
-/// with `error_message` set. A failure in one layer is recorded in the summary
-/// and does not abort the job.
+/// with `error_message` set. The summary carries `aoiAreaSqMeters`,
+/// `aoiPerimeterMeters`, `writtenLayerCount` and a `layers` array. A failure in
+/// one layer is recorded in the summary and does not abort the job.
 char *landclip_clip_package_json(const char *gdb_paths_json,
                                  const char *aoi_path,
                                  const char *out_gpkg_path,
                                  const char *out_csv_path,
+                                 const char *options_json,
                                  landclip_progress_callback progress,
                                  void *progress_context,
                                  char **error_message);

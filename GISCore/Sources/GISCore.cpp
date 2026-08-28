@@ -1,6 +1,7 @@
 #include "GISCore.h"
 
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -368,6 +369,86 @@ std::vector<std::string> parse_json_string_array(const char *json) {
     return values;
 }
 
+/// Parses the string array that follows `"<key>"` in a small JSON object.
+std::vector<std::string> parse_json_array_after_key(const char *json, const char *key) {
+    if (json == nullptr) return {};
+    const std::string text(json);
+    const std::string needle = std::string("\"") + key + "\"";
+    const size_t at = text.find(needle);
+    if (at == std::string::npos) return {};
+    const size_t open = text.find('[', at);
+    if (open == std::string::npos) return {};
+    const size_t close = text.find(']', open);
+    if (close == std::string::npos) return {};
+    return parse_json_string_array(text.substr(open, close - open + 1).c_str());
+}
+
+bool set_contains(const std::vector<std::string> &values, const std::string &value) {
+    for (const std::string &existing : values) {
+        if (existing == value) return true;
+    }
+    return false;
+}
+
+/// Rough AOI area (m²) and perimeter (m): reproject the AOI to the UTM zone under
+/// its centroid, like the Windows tool's estimate_utm_crs(). Returns 0 on any
+/// failure — the value is informational only.
+double compute_aoi_metrics(OGRGeometryH aoi, OGRSpatialReferenceH srs, double *perimeter) {
+    *perimeter = 0.0;
+    if (aoi == nullptr || srs == nullptr) return 0.0;
+
+    OGRSpatialReferenceH wgs = OSRNewSpatialReference(nullptr);
+    OSRImportFromEPSG(wgs, 4326);
+    OSRSetAxisMappingStrategy(wgs, OAMS_TRADITIONAL_GIS_ORDER);
+
+    double lon = 105.0, lat = 16.0;
+    {
+        GeometryGuard g;
+        g.handle = OGR_G_Clone(aoi);
+        if (!OSRIsSame(srs, wgs)) {
+            OGRCoordinateTransformationH t = OCTNewCoordinateTransformation(srs, wgs);
+            if (t != nullptr) { OGR_G_Transform(g.handle, t); OCTDestroyCoordinateTransformation(t); }
+        }
+        OGRGeometryH centroid = OGR_G_CreateGeometry(wkbPoint);
+        if (OGR_G_Centroid(g.handle, centroid) == OGRERR_NONE) {
+            lon = OGR_G_GetX(centroid, 0);
+            lat = OGR_G_GetY(centroid, 0);
+        }
+        OGR_G_DestroyGeometry(centroid);
+    }
+
+    int zone = static_cast<int>(std::floor((lon + 180.0) / 6.0)) + 1;
+    if (zone < 1) zone = 1;
+    if (zone > 60) zone = 60;
+    const int epsg = (lat >= 0.0 ? 32600 : 32700) + zone;
+
+    OGRSpatialReferenceH utm = OSRNewSpatialReference(nullptr);
+    OSRImportFromEPSG(utm, epsg);
+    OSRSetAxisMappingStrategy(utm, OAMS_TRADITIONAL_GIS_ORDER);
+
+    double area = 0.0;
+    {
+        GeometryGuard g;
+        g.handle = OGR_G_Clone(aoi);
+        OGRCoordinateTransformationH t = OCTNewCoordinateTransformation(srs, utm);
+        if (t != nullptr) {
+            if (OGR_G_Transform(g.handle, t) == OGRERR_NONE) {
+                area = OGR_G_Area(g.handle);
+                OGRGeometryH boundary = OGR_G_Boundary(g.handle);
+                if (boundary != nullptr) {
+                    *perimeter = OGR_G_Length(boundary);
+                    OGR_G_DestroyGeometry(boundary);
+                }
+            }
+            OCTDestroyCoordinateTransformation(t);
+        }
+    }
+
+    OSRDestroySpatialReference(wgs);
+    OSRDestroySpatialReference(utm);
+    return area;
+}
+
 struct LayerOutcome {
     std::string gdb;
     std::string source_layer;
@@ -525,6 +606,7 @@ char *landclip_clip_package_json(const char *gdb_paths_json,
                                  const char *aoi_path,
                                  const char *out_gpkg_path,
                                  const char *out_csv_path,
+                                 const char *options_json,
                                  landclip_progress_callback progress,
                                  void *progress_context,
                                  char **error_message) {
@@ -542,6 +624,8 @@ char *landclip_clip_package_json(const char *gdb_paths_json,
         if (error_message != nullptr) *error_message = copy_string("No geodatabase paths supplied.");
         return nullptr;
     }
+    const std::vector<std::string> only_layers = parse_json_array_after_key(options_json, "layers");
+    const std::vector<std::string> skip_layers = parse_json_array_after_key(options_json, "skipLayers");
 
     report_progress(progress, progress_context,
                     "{\"event\":\"phase\",\"phase\":\"aoi\"}");
@@ -557,6 +641,9 @@ char *landclip_clip_package_json(const char *gdb_paths_json,
         ~SrsGuard() { if (h != nullptr) OSRDestroySpatialReference(h); }
     } aoi_srs_guard;
     aoi_srs_guard.h = aoi_srs;
+
+    double aoi_perimeter_m = 0.0;
+    const double aoi_area_m2 = compute_aoi_metrics(aoi.handle, aoi_srs, &aoi_perimeter_m);
 
     GDALDriverH gpkg_driver = GDALGetDriverByName("GPKG");
     if (gpkg_driver == nullptr) {
@@ -607,24 +694,46 @@ char *landclip_clip_package_json(const char *gdb_paths_json,
             const OGRwkbGeometryType geom_type = OGR_FD_GetGeomType(defn);
             const std::string family = geometry_family(geom_type);
 
+            const std::string layer_key = gdb_stem + "::" + layer_name;
+            if (!only_layers.empty() && !set_contains(only_layers, layer_key)) {
+                continue;  // deselected — omit from the summary entirely
+            }
+
             LayerOutcome outcome;
             outcome.gdb = gdb_stem;
             outcome.source_layer = layer_name;
             outcome.geometry_type = geometry_type_name(geom_type);
             outcome.source_count = OGR_L_GetFeatureCount(layer, false);
 
+            if (set_contains(skip_layers, layer_key)) {
+                outcome.status = "reused";
+                outcome.message = "đã xử lý ở lần trước";
+                outcomes.push_back(outcome);
+                continue;
+            }
+
             {
                 std::ostringstream event;
                 event << "{\"event\":\"layer_start\",\"gdb\":" << json_string(gdb_stem.c_str())
-                      << ",\"layer\":" << json_string(layer_name.c_str()) << "}";
+                      << ",\"layer\":" << json_string(layer_name.c_str())
+                      << ",\"geometryType\":" << json_string(outcome.geometry_type.c_str())
+                      << ",\"sourceCount\":" << outcome.source_count << "}";
                 if (report_progress(progress, progress_context, event.str())) { cancelled = true; break; }
             }
 
             OGRSpatialReferenceH layer_srs = OGR_L_GetSpatialRef(layer);
             if (family.empty() || layer_srs == nullptr) {
                 outcome.status = "skipped";
-                outcome.message = family.empty() ? "unsupported geometry" : "layer has no CRS";
+                outcome.message = family.empty()
+                    ? "không phải Point/Line/Polygon (annotation, bảng, hoặc 3D đặc thù)"
+                    : "layer không có CRS";
                 outcomes.push_back(outcome);
+                std::ostringstream event;
+                event << "{\"event\":\"layer_done\",\"gdb\":" << json_string(gdb_stem.c_str())
+                      << ",\"layer\":" << json_string(layer_name.c_str())
+                      << ",\"status\":" << json_string(outcome.status.c_str())
+                      << ",\"candidateCount\":0,\"outputCount\":0}";
+                if (report_progress(progress, progress_context, event.str())) { cancelled = true; break; }
                 continue;
             }
 
@@ -740,7 +849,10 @@ char *landclip_clip_package_json(const char *gdb_paths_json,
     long long written_layers = 0;
     std::ostringstream summary;
     summary << "{\"outputGeoPackage\":" << json_string(out_gpkg_path)
-            << ",\"summaryCsv\":" << json_string(out_csv_path) << ",\"layers\":[";
+            << ",\"summaryCsv\":" << json_string(out_csv_path)
+            << ",\"aoiAreaSqMeters\":" << aoi_area_m2
+            << ",\"aoiPerimeterMeters\":" << aoi_perimeter_m
+            << ",\"layers\":[";
     for (size_t i = 0; i < outcomes.size(); ++i) {
         const LayerOutcome &outcome = outcomes[i];
         if (outcome.status == "written") written_layers += 1;
@@ -770,6 +882,7 @@ char *landclip_clip_package_json(const char *gdb_paths_json,
     (void)aoi_path;
     (void)out_gpkg_path;
     (void)out_csv_path;
+    (void)options_json;
     (void)progress;
     (void)progress_context;
     if (error_message != nullptr) *error_message = copy_string("GISCore was built without GDAL.");

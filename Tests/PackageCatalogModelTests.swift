@@ -161,8 +161,37 @@ final class PackageCatalogModelTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: result.summaryCsv))
         let gpkgSize = (try FileManager.default.attributesOfItem(atPath: result.outputGeoPackage)[.size] as? Int) ?? 0
         XCTAssertGreaterThan(gpkgSize, 0)
+        XCTAssertGreaterThan(result.aoiAreaSqMeters, 0, "AOI area should be computed")
+        XCTAssertGreaterThan(result.aoiPerimeterMeters, 0)
         XCTAssertTrue(events.snapshot.contains("complete"))
         XCTAssertTrue(events.snapshot.contains("layer_done"))
+    }
+
+    func testClipLayerSelection() throws {
+        let engine = NativeClipEngine()
+        guard engine.isAvailable else { throw XCTSkip("Native GDAL only under project-native.yml") }
+        let bundle = Bundle(for: Self.self)
+        guard
+            let gdbURL = bundle.url(forResource: "sample", withExtension: "gdb", subdirectory: "public")
+                ?? bundle.url(forResource: "sample", withExtension: "gdb"),
+            let aoiURL = bundle.url(forResource: "sample-aoi", withExtension: "geojson", subdirectory: "public")
+                ?? bundle.url(forResource: "sample-aoi", withExtension: "geojson")
+        else { return XCTFail("fixtures missing") }
+
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("sel-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: out) }
+
+        // Only sample_points selected; sample_lines marked as already done.
+        let result = try engine.clip(
+            gdbURLs: [gdbURL], aoiURL: aoiURL, outputDirectory: out,
+            selectedLayers: ["sample::sample_points", "sample::sample_lines"],
+            skipLayers: ["sample::sample_lines"]
+        )
+        let names = Set(result.layers.map(\.sourceLayer))
+        XCTAssertEqual(names, ["sample_points", "sample_lines"], "sample_polygons was not selected")
+        XCTAssertEqual(result.layers.first { $0.sourceLayer == "sample_lines" }?.status, "reused")
+        XCTAssertEqual(result.layers.first { $0.sourceLayer == "sample_points" }?.status, "written")
     }
 
     func testDXFAOIClips() throws {

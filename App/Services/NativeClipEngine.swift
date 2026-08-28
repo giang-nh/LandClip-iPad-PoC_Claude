@@ -26,10 +26,15 @@ struct NativeClipEngine: Sendable {
     ///   - aoiURL: GeoJSON / GeoPackage file with one or more polygons and a CRS.
     ///   - outputDirectory: where `result.gpkg` and `result_summary.csv` are written.
     ///   - onEvent: progress events, delivered on a background thread.
+    /// - Parameters:
+    ///   - selectedLayers: `gdb::sourceLayer` keys to process; empty = all supported.
+    ///   - skipLayers: keys to mark "reused" (already done), for resume-after-stop.
     func clip(
         gdbURLs: [URL],
         aoiURL: URL,
         outputDirectory: URL,
+        selectedLayers: [String] = [],
+        skipLayers: [String] = [],
         onEvent: @escaping GISProgressBridge.Handler = { _ in false }
     ) throws -> ClipResult {
         guard isAvailable else { throw ClipEngineError.unavailable }
@@ -42,6 +47,12 @@ struct NativeClipEngine: Sendable {
             data: try JSONEncoder().encode(gdbURLs.map(\.path)),
             encoding: .utf8
         ) ?? "[]"
+        let optionsJSON = String(
+            data: try JSONSerialization.data(withJSONObject: [
+                "layers": selectedLayers, "skipLayers": skipLayers,
+            ]),
+            encoding: .utf8
+        ) ?? "{}"
 
         let bridge = GISProgressBridge(onEvent)
         var nativeError: UnsafeMutablePointer<CChar>?
@@ -49,11 +60,13 @@ struct NativeClipEngine: Sendable {
             aoiURL.path.withCString { aoi in
                 gpkgURL.path.withCString { gpkg in
                     csvURL.path.withCString { csv in
-                        landclip_clip_package_json(
-                            paths, aoi, gpkg, csv,
-                            GISProgressBridge.callback, bridge.context,
-                            &nativeError
-                        )
+                        optionsJSON.withCString { options in
+                            landclip_clip_package_json(
+                                paths, aoi, gpkg, csv, options,
+                                GISProgressBridge.callback, bridge.context,
+                                &nativeError
+                            )
+                        }
                     }
                 }
             }

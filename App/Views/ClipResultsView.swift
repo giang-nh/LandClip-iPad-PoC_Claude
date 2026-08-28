@@ -19,6 +19,10 @@ struct ClipResultsView: View {
                 Section {
                     LabeledContent("Layer có kết quả", value: "\(result.writtenLayerCount)")
                     LabeledContent("Tổng layer xử lý", value: "\(result.layers.count)")
+                    if result.aoiAreaSqMeters > 0 {
+                        LabeledContent("Diện tích AOI", value: Self.areaText(result.aoiAreaSqMeters))
+                        LabeledContent("Chu vi AOI", value: Self.lengthText(result.aoiPerimeterMeters))
+                    }
                 }
                 Section("Chi tiết") {
                     ForEach(filtered) { layer in
@@ -72,12 +76,23 @@ struct ClipResultsView: View {
         }
     }
 
+    static func areaText(_ squareMeters: Double) -> String {
+        squareMeters >= 1_000_000
+            ? String(format: "%.2f km²", squareMeters / 1_000_000)
+            : String(format: "%.0f m²", squareMeters)
+    }
+
+    static func lengthText(_ meters: Double) -> String {
+        meters >= 1000 ? String(format: "%.2f km", meters / 1000) : String(format: "%.0f m", meters)
+    }
+
     private func statusBadge(_ status: String) -> some View {
         let color: Color = {
             switch status {
             case "written": return .green
             case "empty": return .secondary
             case "skipped": return .orange
+            case "reused": return .blue
             default: return .red
             }
         }()

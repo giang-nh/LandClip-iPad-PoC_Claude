@@ -20,7 +20,15 @@ struct ClipResult: Equatable, Sendable, Decodable {
     let summaryCsv: String
     let layers: [ClipLayerResult]
     let writtenLayerCount: Int
+    var aoiAreaSqMeters: Double = 0
+    var aoiPerimeterMeters: Double = 0
 
     var outputGeoPackageURL: URL { URL(fileURLWithPath: outputGeoPackage) }
     var summaryCsvURL: URL { URL(fileURLWithPath: summaryCsv) }
+
+    /// Layer keys (`gdb::sourceLayer`) that finished, for resume.
+    var completedLayerKeys: [String] {
+        layers.filter { ["written", "empty", "skipped"].contains($0.status) }
+            .map { "\($0.gdb)::\($0.sourceLayer)" }
+    }
 }
