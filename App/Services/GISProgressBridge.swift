@@ -35,6 +35,8 @@ struct GISProgressEvent: Decodable, Sendable {
     let gdb: String?
     let layer: String?
     let status: String?
+    let geometryType: String?
+    let sourceCount: Int?
     let entriesDone: Int?
     let bytesDone: Int?
     let candidateCount: Int?

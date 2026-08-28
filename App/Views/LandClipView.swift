@@ -9,6 +9,7 @@ struct LandClipView: View {
     @State private var showResults = false
     @State private var showAcknowledgements = false
     @State private var showLayerSelection = false
+    @State private var satellite = true
     @State private var camera: MapCameraPosition = .region(
         MKCoordinateRegion(
             center: CLLocationCoordinate2D(latitude: 16.0, longitude: 106.0),
@@ -116,22 +117,70 @@ struct LandClipView: View {
                     MapPolyline(coordinates: model.aoiVertices)
                         .stroke(.blue, lineWidth: 2)
                 }
+                if let anchor = model.rectangleAnchor {
+                    Annotation("Góc 1", coordinate: anchor) {
+                        Image(systemName: "plus.viewfinder").foregroundStyle(.blue)
+                    }
+                }
                 ForEach(Array(model.aoiVertices.enumerated()), id: \.offset) { index, coordinate in
                     Annotation("Điểm \(index + 1)", coordinate: coordinate) {
                         Circle()
-                            .fill(.white)
-                            .stroke(.blue, lineWidth: 3)
-                            .frame(width: 14, height: 14)
+                            .fill(.white).stroke(.blue, lineWidth: 3)
+                            .frame(width: 16, height: 16)
+                            .onTapGesture { model.deleteVertex(at: index) }
                     }
                 }
             }
-            .mapStyle(.imagery(elevation: .flat))
+            .mapStyle(satellite ? .imagery(elevation: .flat) : .standard)
             .onTapGesture(coordinateSpace: .local) { point in
-                guard model.canDraw, let coordinate = proxy.convert(point, from: .local) else { return }
-                model.aoiVertices.append(coordinate)
+                handleMapTap(point, proxy: proxy)
             }
+            .overlay(alignment: .topTrailing) { mapControls }
         }
         .ignoresSafeArea(edges: .bottom)
+    }
+
+    private var mapControls: some View {
+        VStack(spacing: 8) {
+            Button {
+                satellite.toggle()
+            } label: {
+                Image(systemName: satellite ? "map" : "globe.americas.fill")
+            }
+            if model.canDraw {
+                Button {
+                    model.drawMode = model.drawMode == .polygon ? .rectangle : .polygon
+                    model.clearAOIDrawing()
+                } label: {
+                    Image(systemName: model.drawMode == .polygon ? "hexagon" : "rectangle")
+                }
+            }
+        }
+        .padding(8)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .padding(12)
+    }
+
+    private func handleMapTap(_ point: CGPoint, proxy: MapProxy) {
+        guard model.canDraw, let coordinate = proxy.convert(point, from: .local) else { return }
+        // Tap near an existing vertex deletes it.
+        for (index, vertex) in model.aoiVertices.enumerated() {
+            if let screen = proxy.convert(vertex, to: .local), hypot(screen.x - point.x, screen.y - point.y) < 22 {
+                model.deleteVertex(at: index)
+                return
+            }
+        }
+        switch model.drawMode {
+        case .polygon:
+            model.aoiVertices.append(coordinate)
+        case .rectangle:
+            if let anchor = model.rectangleAnchor {
+                model.setRectangle(anchor, coordinate)
+            } else {
+                model.clearAOIDrawing()
+                model.rectangleAnchor = coordinate
+            }
+        }
     }
 
     @ViewBuilder
@@ -200,8 +249,14 @@ struct LandClipView: View {
             }
         } else {
             HStack {
-                Text("AOI: \(model.aoiVertices.count) điểm")
-                    .font(.subheadline)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("AOI \(model.drawMode == .rectangle ? "hình chữ nhật" : "đa giác"): \(model.aoiVertices.count) điểm")
+                        .font(.subheadline)
+                    Text(model.drawMode == .rectangle
+                         ? "Chạm 2 góc đối diện"
+                         : "Chạm để thêm · chạm lên đỉnh để xoá")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
                 Spacer()
                 Button {
                     importingAOI = true
@@ -209,11 +264,11 @@ struct LandClipView: View {
                 Button {
                     if !model.aoiVertices.isEmpty { model.aoiVertices.removeLast() }
                 } label: { Image(systemName: "arrow.uturn.backward") }
-                    .disabled(model.aoiVertices.isEmpty)
+                    .disabled(model.aoiVertices.isEmpty || model.drawMode == .rectangle)
                 Button {
-                    model.aoiVertices.removeAll()
+                    model.clearAOIDrawing()
                 } label: { Image(systemName: "trash") }
-                    .disabled(model.aoiVertices.isEmpty)
+                    .disabled(model.aoiVertices.isEmpty && model.rectangleAnchor == nil)
             }
             .buttonStyle(.bordered)
         }
@@ -246,6 +301,26 @@ struct LandClipView: View {
                 Text(model.progress.detail)
                     .font(.caption).foregroundStyle(.secondary)
                     .lineLimit(1)
+            }
+            if !model.liveRows.isEmpty {
+                ScrollView {
+                    VStack(spacing: 4) {
+                        ForEach(model.liveRows.reversed()) { row in
+                            HStack {
+                                Image(systemName: row.status == "running" ? "circle.dotted" : "checkmark.circle")
+                                    .foregroundStyle(row.status == "running" ? .secondary : .green)
+                                    .font(.caption2)
+                                Text(row.layer).font(.caption).lineLimit(1)
+                                Spacer()
+                                Text(row.status == "running"
+                                     ? "nguồn \(row.sourceCount)"
+                                     : "\(row.candidateCount) → \(row.outputCount)")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                .frame(maxHeight: 130)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

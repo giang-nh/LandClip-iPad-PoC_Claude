@@ -27,12 +27,51 @@ final class LandClipViewModel: ObservableObject {
         var layersDone: Int = 0
     }
 
+    struct LiveRow: Identifiable, Equatable {
+        var id: String { "\(gdb)::\(layer)" }
+        let gdb: String
+        let layer: String
+        var geometryType: String = ""
+        var sourceCount: Int = 0
+        var candidateCount: Int = 0
+        var outputCount: Int = 0
+        var status: String = "running"
+    }
+    @Published private(set) var liveRows: [LiveRow] = []
+
     @Published private(set) var stage: Stage = .idle
     @Published private(set) var progress = Report()
     @Published private(set) var catalog: PackageCatalog?
     @Published private(set) var result: ClipResult?
+    enum DrawMode { case polygon, rectangle }
+    @Published var drawMode: DrawMode = .polygon
     /// AOI polygon vertices in WGS-84, in the order the user tapped them.
     @Published var aoiVertices: [CLLocationCoordinate2D] = []
+    /// First corner while drawing a rectangle.
+    @Published var rectangleAnchor: CLLocationCoordinate2D?
+
+    func deleteVertex(at index: Int) {
+        guard aoiVertices.indices.contains(index) else { return }
+        aoiVertices.remove(at: index)
+    }
+
+    /// Places a rectangle AOI from two opposite corners.
+    func setRectangle(_ a: CLLocationCoordinate2D, _ b: CLLocationCoordinate2D) {
+        let minLat = min(a.latitude, b.latitude), maxLat = max(a.latitude, b.latitude)
+        let minLon = min(a.longitude, b.longitude), maxLon = max(a.longitude, b.longitude)
+        aoiVertices = [
+            .init(latitude: minLat, longitude: minLon),
+            .init(latitude: minLat, longitude: maxLon),
+            .init(latitude: maxLat, longitude: maxLon),
+            .init(latitude: maxLat, longitude: minLon),
+        ]
+        rectangleAnchor = nil
+    }
+
+    func clearAOIDrawing() {
+        aoiVertices.removeAll()
+        rectangleAnchor = nil
+    }
     /// An imported AOI file (GeoJSON / GeoPackage); takes priority over `aoiVertices`.
     @Published private(set) var importedAOIName: String?
     /// Supported layer keys the user has excluded (empty = process all).
@@ -179,6 +218,7 @@ final class LandClipViewModel: ObservableObject {
     func runClip() {
         guard stage == .ready || stage == .done, let prepared, hasAOI else { return }
         progress = Report()
+        liveRows = []
         result = nil
         stage = .clipping
 
@@ -257,9 +297,22 @@ final class LandClipViewModel: ObservableObject {
             if let entries = event.entriesDone { progress.detail = "\(entries) mục" }
         case "layer_start":
             progress.detail = [event.gdb, event.layer].compactMap { $0 }.joined(separator: " / ")
+            if let gdb = event.gdb, let layer = event.layer {
+                var row = LiveRow(gdb: gdb, layer: layer)
+                row.geometryType = event.geometryType ?? ""
+                row.sourceCount = event.sourceCount ?? 0
+                liveRows.removeAll { $0.id == row.id }
+                liveRows.append(row)
+            }
         case "layer_done":
             progress.layersDone += 1
             if let count = event.outputCount { progress.detail = "\(progress.detail) → \(count)" }
+            if let gdb = event.gdb, let layer = event.layer,
+               let idx = liveRows.firstIndex(where: { $0.id == "\(gdb)::\(layer)" }) {
+                liveRows[idx].candidateCount = event.candidateCount ?? liveRows[idx].candidateCount
+                liveRows[idx].outputCount = event.outputCount ?? liveRows[idx].outputCount
+                liveRows[idx].status = event.status ?? "done"
+            }
         case "complete":
             progress.phase = "Hoàn tất"
             progress.detail = ""
